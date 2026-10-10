@@ -28,6 +28,33 @@ struct RelaySettingsView: View {
                 }
                 .accessibilityLabel("Connection status: \(appState.connectionState.displayName)")
 
+                if let health = viewModel.relayHealth {
+                    HStack(alignment: .top, spacing: AegisLayout.s) {
+                        Image(systemName: health.status == .reachable ? "checkmark.circle.fill"
+                             : health.status == .checking ? "arrow.triangle.2.circlepath"
+                             : "xmark.circle.fill")
+                            .foregroundStyle(health.status == .reachable ? AegisColors.success
+                                             : health.status == .checking ? AegisColors.textSecondary
+                                             : AegisColors.warning)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(healthShortURL(health.url))
+                                .font(AegisType.callout)
+                                .foregroundStyle(AegisColors.textPrimary)
+                            Text(health.detail)
+                                .font(AegisType.caption)
+                                .foregroundStyle(AegisColors.textSecondary)
+                            if let ms = health.latencyMs, let checked = health.lastCheckedAt {
+                                Text("\(ms) ms · checked \(relativeTime(checked))")
+                                    .font(AegisType.caption)
+                                    .foregroundStyle(AegisColors.textSecondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .accessibilityLabel("Relay health: \(health.detail)")
+                }
+
                 Button {
                     Task { @MainActor in await viewModel.retryConnection() }
                 } label: {
@@ -40,6 +67,7 @@ struct RelaySettingsView: View {
                 ForEach([RelayConfig.Mode.automatic, .lanOnly, .customRelay], id: \.self) { option in
                     Button {
                         mode = option
+                        viewModel.relayConfigError = nil
                         Haptics.selection()
                     } label: {
                         HStack {
@@ -60,6 +88,42 @@ struct RelaySettingsView: View {
                         }
                     }
                     .accessibilityLabel("\(modeTitle(option)) relay mode")
+                }
+            }
+
+            if mode == .automatic {
+                Section {
+                    if let url = viewModel.effectiveRelayURL {
+                        HStack(alignment: .top, spacing: AegisLayout.s) {
+                            Image(systemName: "server.rack")
+                                .foregroundStyle(AegisColors.textSecondary)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Using relay")
+                                    .font(AegisType.callout)
+                                    .foregroundStyle(AegisColors.textPrimary)
+                                Text(healthShortURL(url))
+                                    .font(AegisType.caption)
+                                    .foregroundStyle(AegisColors.textSecondary)
+                            }
+                        }
+                        .accessibilityLabel("Automatic mode is using relay \(healthShortURL(url))")
+                    } else {
+                        HStack(alignment: .top, spacing: AegisLayout.s) {
+                            Image(systemName: "house.fill")
+                                .foregroundStyle(AegisColors.textSecondary)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("No relay configured — running on local network only.")
+                                    .font(AegisType.callout)
+                                    .foregroundStyle(AegisColors.textPrimary)
+                                Text("Messages work with nearby devices. Add your own relay below to reach anyone beyond your network.")
+                                    .font(AegisType.caption)
+                                    .foregroundStyle(AegisColors.textSecondary)
+                            }
+                        }
+                        .accessibilityLabel("No relay configured. Running on local network only.")
+                    }
                 }
             }
 
@@ -109,6 +173,17 @@ struct RelaySettingsView: View {
             }
 
             Section {
+                if let configError = viewModel.relayConfigError {
+                    HStack(alignment: .top, spacing: AegisLayout.s) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(AegisColors.danger)
+                            .accessibilityHidden(true)
+                        Text(configError)
+                            .font(AegisType.callout)
+                            .foregroundStyle(AegisColors.danger)
+                    }
+                    .accessibilityLabel("Configuration error: \(configError)")
+                }
                 Button {
                     Task { @MainActor in await apply() }
                 } label: {
@@ -132,6 +207,7 @@ struct RelaySettingsView: View {
             let config = await viewModel.currentRelayConfig()
             mode = config.mode
             customURL = config.customRelayURL ?? ""
+            await viewModel.refreshRelayStatus()
         }
     }
 
@@ -139,10 +215,25 @@ struct RelaySettingsView: View {
         switch appState.connectionState {
         case .relayConnected: return AegisColors.success
         case .lanOnly: return AegisColors.success
+        case .localNetworkOnly: return AegisColors.textSecondary
         case .relayConnecting: return AegisColors.textSecondary
         case .relayUnreachable: return AegisColors.warning
         case .offline: return AegisColors.danger
         }
+    }
+
+    /// Short display form of a relay URL (host only, no scheme clutter).
+    private func healthShortURL(_ urlString: String) -> String {
+        if let url = URL(string: urlString), let host = url.host, !host.isEmpty {
+            return host
+        }
+        return urlString
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private func modeTitle(_ mode: RelayConfig.Mode) -> String {
@@ -155,7 +246,7 @@ struct RelaySettingsView: View {
 
     private func modeDetail(_ mode: RelayConfig.Mode) -> String {
         switch mode {
-        case .automatic: return "Local network first, community relay as fallback"
+        case .automatic: return "Local network first, your verified relay as fallback"
         case .lanOnly: return "Never touches the internet"
         case .customRelay: return "Your own self-hosted relay"
         }
@@ -169,6 +260,7 @@ struct RelaySettingsView: View {
             mode: mode,
             customRelayURL: mode == .customRelay && !url.isEmpty ? url : nil
         ))
+        await viewModel.refreshRelayStatus()
     }
 }
 

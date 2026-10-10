@@ -251,20 +251,28 @@ struct LiveTransportService: TransportService {
     }
 
     func testRelay(url: String) async -> RelayTestResult {
-        guard let url = URL(string: url) else {
-            return RelayTestResult(reachable: false, latencyMs: nil, detail: "Invalid URL")
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized: URL
+        switch RelayURLValidator.normalize(trimmed) {
+        case .success(let url):
+            normalized = url
+        case .failure(let error):
+            return RelayTestResult(reachable: false, latencyMs: nil, detail: error.description)
         }
-        let probe = RelayTransport(url: url)
-        let start = Date()
-        await probe.start()
-        defer { Task { await probe.stop() } }
-        for await event in probe.events {
-            if case .hello = event {
-                let ms = Int(Date().timeIntervalSince(start) * 1000)
-                return RelayTestResult(reachable: true, latencyMs: ms, detail: "Relay handshake OK")
-            }
+        let result = await RelayProbe.handshake(url: normalized)
+        if result.reachable {
+            // A verified relay becomes automatic mode's fallback.
+            UserDefaults.standard.set(normalized.absoluteString, forKey: SettingsKeys.relayLastKnownGoodURL)
         }
-        return RelayTestResult(reachable: false, latencyMs: nil, detail: "No hello from relay")
+        return RelayTestResult(reachable: result.reachable, latencyMs: result.latencyMs, detail: result.detail)
+    }
+
+    func effectiveRelayURL() async -> String? {
+        await core.getEffectiveRelayURL()
+    }
+
+    func relayHealth() async -> RelayHealth? {
+        await core.getRelayHealth()
     }
 
     // MARK: Messaging

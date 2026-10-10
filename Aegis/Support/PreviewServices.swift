@@ -241,6 +241,10 @@ actor MockTransport: TransportService {
         )
     }
 
+    func effectiveRelayURL() async -> String? { nil }
+
+    func relayHealth() async -> RelayHealth? { nil }
+
     // MARK: Messaging
 
     func sendEnvelope(_ envelope: OutgoingEnvelope) async throws {

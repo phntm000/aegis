@@ -315,11 +315,16 @@ the mapping is:
   AegisCrypto, and constructs its `IncomingCall`. Media (WebRTC peer
   connection, SRTP) is app-layer; the transports move the signaling and,
   optionally, relay the UDP (§6).
-- **`RelayConfig.Mode`** → hub policy: `automatic` = all transports +
-  default relay; `lanOnly` = `.lanOnly` policy, no relay transport;
-  `customRelay` = `RelayTransport(url: customRelayURL, pinnedCertificateSHA256:)`.
-- **`testRelay(url:)`** → open a `RelayTransport`, wait for `hello`, measure
-  handshake latency, `stop()`. Never blocks the UI; never sends identity.
+- **`RelayConfig.Mode`** → hub policy: `automatic` = LAN first, plus the
+  last verified relay URL when one exists (verified = passed a handshake
+  probe or a live hello; automatic never invents an endpoint, and with
+  nothing verified it is honest local-network operation); `lanOnly` =
+  `.lanOnly` policy, no relay transport; `customRelay` =
+  `RelayTransport(url: validatedCustomURL)`.
+- **`testRelay(url:)`** → normalize + validate the URL, open a transient
+  `RelayTransport` via `RelayProbe.handshake`, wait for `hello` (15s
+  timeout), measure handshake latency, `stop()`. Never blocks the UI; never
+  sends identity. Success records the URL as automatic mode's fallback.
 - **Delivery modes** → `DeliveryCoordinator.deliveryMode(for:)` feeds the
   conversation-level indicator; `DeliveryEvent` feeds badges and local
   notifications.

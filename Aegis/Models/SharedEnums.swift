@@ -69,11 +69,15 @@ enum ConnectionState: String, Sendable, Codable {
     case relayConnected
     /// Relay unreachable; LAN peers may still work.
     case relayUnreachable
+    /// Automatic mode with no verified relay: honest local-network operation.
+    /// Not a failure — LAN peers work; nothing was silently misconfigured.
+    case localNetworkOnly
 
     var displayName: String {
         switch self {
         case .offline: return "Offline"
         case .lanOnly: return "LAN only"
+        case .localNetworkOnly: return "Local network only"
         case .relayConnecting: return "Connecting…"
         case .relayConnected: return "Connected"
         case .relayUnreachable: return "Relay unreachable"
@@ -83,7 +87,7 @@ enum ConnectionState: String, Sendable, Codable {
     /// Whether envelopes can currently be sent.
     var canSend: Bool {
         switch self {
-        case .lanOnly, .relayConnected, .relayUnreachable: return true
+        case .lanOnly, .localNetworkOnly, .relayConnected, .relayUnreachable: return true
         case .offline, .relayConnecting: return false
         }
     }

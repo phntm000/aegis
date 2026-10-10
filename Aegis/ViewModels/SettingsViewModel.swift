@@ -1,3 +1,4 @@
+import AegisTransport
 import Foundation
 
 /// Settings: identity, privacy, relay, storage, and the danger zone.
@@ -16,6 +17,11 @@ final class SettingsViewModel: ObservableObject {
     // Relay testing
     @Published private(set) var relayTestResult: RelayTestResult?
     @Published private(set) var isTestingRelay = false
+    // Relay configuration
+    @Published var relayConfigError: String?
+    @Published private(set) var relayHealth: RelayHealth?
+    @Published private(set) var effectiveRelayURL: String?
+    @Published private(set) var isApplyingRelay = false
 
     private let appState: AppState
 
@@ -64,15 +70,49 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func applyRelayConfig(_ config: RelayConfig) async {
+        relayConfigError = nil
+        var config = config
+        if config.mode == .customRelay {
+            // 1. Format validation — blocks apply with a clear message.
+            let raw = (config.customRelayURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            switch RelayURLValidator.normalize(raw) {
+            case .failure(let validationError):
+                relayConfigError = validationError.description
+                Haptics.notification(.error)
+                return
+            case .success(let url):
+                config.customRelayURL = url.absoluteString
+            }
+            // 2. Reachability probe — blocks apply when the relay doesn't
+            // answer. Never silently save a dead endpoint.
+            isTestingRelay = true
+            defer { isTestingRelay = false }
+            let probe = await appState.transport.testRelay(url: config.customRelayURL ?? "")
+            relayTestResult = probe
+            guard probe.reachable else {
+                relayConfigError = "That relay didn't answer (\(probe.detail)). Check the URL and your connection, then try again."
+                Haptics.notification(.error)
+                return
+            }
+        }
+        isApplyingRelay = true
+        defer { isApplyingRelay = false }
         do {
             try await appState.transport.configureRelay(config)
             UserDefaults.standard.set(config.mode.rawValue, forKey: SettingsKeys.relayMode)
             UserDefaults.standard.set(config.customRelayURL, forKey: SettingsKeys.relayCustomURL)
+            await refreshRelayStatus()
             Haptics.notification(.success)
         } catch {
             self.error = error.localizedDescription
             Haptics.notification(.error)
         }
+    }
+
+    /// Refreshes the health readout and resolved relay URL shown in Settings.
+    func refreshRelayStatus() async {
+        relayHealth = await appState.transport.relayHealth()
+        effectiveRelayURL = await appState.transport.effectiveRelayURL()
     }
 
     func testRelay(url: String) async {

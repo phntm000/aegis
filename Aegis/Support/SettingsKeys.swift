@@ -24,6 +24,9 @@ enum SettingsKeys {
     // Relay
     static let relayMode = "relay.mode"
     static let relayCustomURL = "relay.customURL"
+    /// Last relay URL that verified (handshake probe or live hello).
+    /// Automatic mode's only fallback — never a placeholder.
+    static let relayLastKnownGoodURL = "relay.lastKnownGoodURL"
 }
 
 /// Appearance mode persisted in Settings.

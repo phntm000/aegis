@@ -140,6 +140,21 @@ actor AegisCore {
     let mediaRouter = CallMediaRouter()
     private(set) var relayConfig: RelayConfig = .default
 
+    /// The relay URL the current mode resolved to, if any. Nil means no relay
+    /// is in use (local-network operation) — never a placeholder.
+    private(set) var effectiveRelayURL: String?
+    /// Latest health assessment of the effective relay. Nil when no relay is
+    /// configured.
+    private(set) var relayHealth: RelayHealth?
+
+    /// A relay URL that previously proved it speaks our protocol (live hello)
+    /// or passed a handshake probe. The only thing automatic mode falls back
+    /// to — automatic mode never invents an endpoint.
+    private var lastKnownGoodRelayURL: String? {
+        get { UserDefaults.standard.string(forKey: SettingsKeys.relayLastKnownGoodURL) }
+        set { UserDefaults.standard.set(newValue, forKey: SettingsKeys.relayLastKnownGoodURL) }
+    }
+
     // MARK: Routing
 
     /// mailbox hex → target. The relay routes on the mailbox; we resolve it
@@ -258,14 +273,10 @@ actor AegisCore {
         ))
         await engine.restoreSessions()
         try await rebuildRoutesFromStore()
-        await hub.start()
-        delivery.start()
-        connectionCont.yield(currentConnectionStateSync())
+        // Resolves the relay for the current mode (honestly — automatic never
+        // invents an endpoint), rebuilds the hub, and starts health tracking.
+        await applyRelayConfigToTransports(relayConfig)
         didStart = true
-        let generation = consumeGeneration
-        Task { await self.consumeInbound(generation: generation) }
-        Task { await self.consumeCoordinatorEvents(generation: generation) }
-        Task { await self.watchTransportStates(generation: generation) }
     }
 
     /// (Re)builds mailbox routes for every known conversation.
@@ -331,25 +342,32 @@ actor AegisCore {
 
     func configureRelay(_ config: RelayConfig) async throws {
         relayConfig = config
-        // Generation bump retires the old consume tasks before the rebuild.
+        await applyRelayConfigToTransports(config)
+    }
+
+    /// Resolves the relay URL for `config` (never inventing one), rebuilds
+    /// the transport hub around it, re-binds every known mailbox, and starts
+    /// health tracking. Shared by start() and configureRelay().
+    private func applyRelayConfigToTransports(_ config: RelayConfig) async {
+        // Generation bump retires the old consume/health tasks before rebuild.
         consumeGeneration &+= 1
-        // Rebuild the hub with the right relay transport.
         await hub.stop()
         var transports: [any Transport] = [lan]
+        // Honest resolution: automatic uses only a previously verified relay
+        // (or nothing); customRelay uses the validated custom URL; lanOnly
+        // uses nothing. There is no default community relay.
+        let resolved = RelayEndpointResolver.resolveURL(
+            mode: config.mode.rawValue,
+            customURL: config.customRelayURL,
+            lastKnownGoodURL: lastKnownGoodRelayURL
+        )
         var newRelay: RelayTransport? = nil
-        switch config.mode {
-        case .automatic:
-            if let url = URL(string: "wss://relay.aegis.example") {
-                newRelay = RelayTransport(url: url)
-                transports.append(newRelay!)
-            }
-        case .customRelay:
-            if let raw = config.customRelayURL, let url = URL(string: raw) {
-                newRelay = RelayTransport(url: url)
-                transports.append(newRelay!)
-            }
-        case .lanOnly:
-            break
+        if let url = resolved {
+            newRelay = RelayTransport(url: url)
+            transports.append(newRelay!)
+            effectiveRelayURL = url.absoluteString
+        } else {
+            effectiveRelayURL = nil
         }
         self.relay = newRelay
         self.hub = TransportHub(transports: transports)
@@ -369,7 +387,96 @@ actor AegisCore {
         Task { await self.consumeInbound(generation: generation) }
         Task { await self.consumeCoordinatorEvents(generation: generation) }
         Task { await self.watchTransportStates(generation: generation) }
+        Task { await self.watchRelayHealth(generation: generation) }
+        if let urlString = effectiveRelayURL, let liveRelay = newRelay {
+            let configuredAt = Date()
+            relayHealth = RelayHealth(
+                url: urlString, status: .checking,
+                detail: "Probing relay…"
+            )
+            Task { [weak self] in
+                await self?.watchRelayHellos(
+                    relay: liveRelay, urlString: urlString,
+                    configuredAt: configuredAt, generation: generation
+                )
+            }
+        } else {
+            relayHealth = nil
+        }
         connectionCont.yield(currentConnectionStateSync())
+    }
+
+    /// Latest health assessment of the effective relay (nil when no relay is
+    /// configured). Surfaced in Settings.
+    func getRelayHealth() async -> RelayHealth? { relayHealth }
+
+    /// The relay URL the current mode resolved to, if any.
+    func getEffectiveRelayURL() async -> String? { effectiveRelayURL }
+
+    /// Waits for the live relay's first protocol hello — proof it speaks our
+    /// protocol, not just that a TCP/TLS handshake succeeded. On hello: marks
+    /// the relay reachable and records it as last-known-good. On timeout: marks
+    /// unreachable (the transport keeps retrying with backoff; the periodic
+    /// probe keeps the readout honest).
+    private func watchRelayHellos(
+        relay: RelayTransport,
+        urlString: String,
+        configuredAt: Date,
+        generation: Int
+    ) async {
+        let helloSeen: Bool = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await event in relay.events {
+                    if case .hello = event { return true }
+                }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        guard generation == consumeGeneration else { return }
+        if helloSeen {
+            let ms = Int(Date().timeIntervalSince(configuredAt) * 1000)
+            relayHealth = RelayHealth(
+                url: urlString, status: .reachable, latencyMs: ms,
+                lastCheckedAt: Date(), detail: "Relay handshake OK"
+            )
+            lastKnownGoodRelayURL = urlString
+        } else if relayHealth?.status == .checking {
+            relayHealth = RelayHealth(
+                url: urlString, status: .unreachable, lastCheckedAt: Date(),
+                detail: "No handshake from relay yet — retrying in background"
+            )
+        }
+        connectionCont.yield(currentConnectionStateSync())
+    }
+
+    /// Periodic one-shot handshake probe on a transient transport — never
+    /// disturbs the live connection. Keeps the Settings health readout honest
+    /// when the live transport is down or still checking.
+    private func watchRelayHealth(generation: Int) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard generation == consumeGeneration else { return }
+            guard let urlString = effectiveRelayURL, let url = URL(string: urlString) else { continue }
+            if relayHealth?.status == .reachable, relay?.currentState == .connected { continue }
+            let result = await RelayProbe.handshake(url: url)
+            guard generation == consumeGeneration else { return }
+            relayHealth = RelayHealth(
+                url: urlString,
+                status: result.reachable ? .reachable : .unreachable,
+                latencyMs: result.latencyMs,
+                lastCheckedAt: Date(),
+                detail: result.detail
+            )
+            if result.reachable { lastKnownGoodRelayURL = urlString }
+            connectionCont.yield(currentConnectionStateSync())
+        }
     }
 
     func currentConnectionStateSync() -> ConnectionState {
@@ -378,6 +485,8 @@ actor AegisCore {
         switch (relayConfig.mode, relayState, lanState) {
         case (.lanOnly, _, .connected): return .lanOnly
         case (.lanOnly, _, _): return .offline
+        case (.automatic, _, .connected) where relay == nil: return .localNetworkOnly
+        case (.automatic, _, _) where relay == nil: return .offline
         case (_, .connected, _): return .relayConnected
         case (_, .connecting, _): return .relayConnecting
         case (_, _, .connected): return .relayUnreachable

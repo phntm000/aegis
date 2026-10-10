@@ -42,7 +42,9 @@ struct IncomingEnvelope: Sendable, Hashable {
 
 struct RelayConfig: Sendable, Codable, Hashable {
     enum Mode: String, Sendable, Codable {
-        /// Try LAN first, fall back to the default community relay.
+        /// Try LAN first, fall back to the last verified relay (if any).
+        /// With no verified relay this is honest local-network operation —
+        /// it never invents an endpoint.
         case automatic
         /// Never touch the internet; LAN peers only. Bannered in the UI.
         case lanOnly
@@ -110,6 +112,12 @@ protocol TransportService: Sendable {
     func retryConnection() async
     /// Probe a relay URL from settings; never blocks the UI.
     func testRelay(url: String) async -> RelayTestResult
+    /// The relay URL the current mode resolved to, if any. Nil means no relay
+    /// is in use (local-network operation).
+    func effectiveRelayURL() async -> String?
+    /// Latest health assessment of the effective relay. Nil when no relay is
+    /// configured.
+    func relayHealth() async -> RelayHealth?
 
     // MARK: Messaging
 

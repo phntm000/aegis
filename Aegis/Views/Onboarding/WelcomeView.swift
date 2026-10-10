@@ -31,7 +31,7 @@ struct WelcomeView: View {
                 explainerRow(
                     icon: "server.rack",
                     title: "Free forever, yours to host",
-                    body: "The relay code is open source. Use the community relay, go LAN-only, or self-host in minutes."
+                    body: "The relay code is open source. Go LAN-only, or self-host a relay in minutes."
                 )
             }
             .padding(.horizontal, AegisLayout.l)

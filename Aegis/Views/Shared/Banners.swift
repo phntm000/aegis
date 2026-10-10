@@ -64,6 +64,13 @@ struct ConnectionBannerView: View {
                 tint: AegisColors.success,
                 showRetry: false
             )
+        case .localNetworkOnly:
+            banner(
+                icon: "house.fill",
+                text: "No relay configured — running on local network only. Add your own relay in Settings to reach beyond it.",
+                tint: AegisColors.textSecondary,
+                showRetry: false
+            )
         case .relayConnecting:
             banner(
                 icon: "arrow.triangle.2.circlepath",
