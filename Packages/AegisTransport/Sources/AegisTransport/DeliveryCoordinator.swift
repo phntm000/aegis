@@ -392,9 +392,9 @@ public final class DeliveryCoordinator: NSObject, @unchecked Sendable {
         let waiter = Task {
             for await event in relay.events {
                 if case .drained(let mailbox) = event {
-                    let done = drained.withLock { () -> Bool in
-                        $0.insert(mailbox)
-                        return tracked.isSubset(of: $0)
+                    let done = drained.withLock { (drainedSet: inout Set<MailboxID>) -> Bool in
+                        drainedSet.insert(mailbox)
+                        return tracked.isSubset(of: drainedSet)
                     }
                     if done { break }
                 }

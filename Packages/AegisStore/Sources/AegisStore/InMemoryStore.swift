@@ -13,7 +13,7 @@
 
 import Foundation
 
-public actor InMemoryAegisStore: AegisStore {
+public actor InMemoryAegisStore: AegisStore, ConversationRepository, MessageRepository, ContactRepository, GroupMembershipRepository, AttachmentRepository, CallRecordRepository {
     // MARK: - Storage
 
     private var conversationsByID: [ConversationID: Conversation] = [:]
