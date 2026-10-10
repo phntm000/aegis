@@ -74,6 +74,9 @@ targets:
       - path: AegisTests
     dependencies:
       - target: Aegis
+      - package: AegisCrypto
+        products:
+          - AegisCrypto
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.tests
