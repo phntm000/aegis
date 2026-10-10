@@ -160,6 +160,55 @@ media-path MITM. But call *metadata* (who called whom, when, for how
 long) is fully visible, and voice biometrics identify speakers regardless
 of encryption.
 
+### 4.10 Voice rooms
+
+Voice rooms are full-mesh audio-only WebRTC: one peer connection per
+remote participant, signaled over the group's existing E2EE sender-key
+channel (join/leave/mute/deafen/heartbeat). Security properties:
+
+- **Media confidentiality** inherits the 1:1 call guarantees
+  (DTLS-SRTP per peer connection; §4.9). There is no SFU, so no middlebox
+  ever holds media keys.
+- **Membership binding is social, not cryptographic.** A room's
+  participant list is whatever the group's sender-key channel says it
+  is. A malicious group member can invite an unlisted listener's client
+  to the mesh without other participants' clients knowing — the same
+  residual risk as a group member re-sharing plaintext (§4.8). The UI
+  shows the participant roster; treat unexpected participants as a
+  signal to verify.
+- **Mute/deafen are advisory.** A modified client can ignore another
+  participant's mute state and keep transmitting, or keep listening
+  while displaying "muted". The protocol cannot enforce client-side
+  audio policy.
+- **No per-room SAS ceremony.** The 1:1 SAS binds media keys for two
+  parties; rooms rely on the group channel's authentication instead.
+  A network adversary who compromises the signaling channel could MITM
+  room media the same way they could MITM group messages.
+
+### 4.11 Linked secondary devices (paired-relay model)
+
+A linked device holds **no identity keys**. It pairs over an E2EE channel
+(X25519 ephemeral-ephemeral via QR + 4-word SAS from the DH secret, which
+binds the pairing against MITM) and thereafter relays all traffic through
+the primary device, which performs all cryptographic operations.
+
+- **Contact-facing crypto is untouched.** X3DH, Double Ratchet, and
+  sender keys terminate at the primary's identity. Contacts see one
+  identity; there is no "ghost device" — the linked device never
+  presents its own keys to contacts.
+- **Trust boundary moves to the primary↔linked channel.** That channel
+  is AES-GCM with a long-term key from the pairing DH, persisted in the
+  OS Keychain on both sides. If it is compromised, the attacker reads
+  the linked device's synced content (contacts, conversations, recent
+  history from the provisioning bundle, and live message relay).
+- **The linked device is a full read/write delegate.** Unpairing wipes
+  the paired channel keys on both sides (dedicated confirmation UI), but
+  content already synced to the linked device cannot be remotely wiped —
+  treat an unpair like a device you no longer control.
+- **Availability coupling.** The linked device needs the primary
+  reachable to send/receive. This is a deliberate usability tradeoff,
+  documented in code (`DeviceLinkManager.swift`).
+
 ## 5. Endpoint security posture
 
 | Layer | Mechanism |

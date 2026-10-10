@@ -121,6 +121,23 @@ final class PrimitiveTests: XCTestCase {
         XCTAssertFalse(testProvider.ed25519Verify(publicKey: publicKey, signature: sig, message: Data("hallo".utf8)))
     }
 
+    /// RFC 8032 §7.1 TEST 1 — hard known-answer vector for the signature
+    /// scheme. If any byte below is wrong the test fails loudly; that is the
+    /// point (a wrong constant must never silently pass).
+    func testEd25519RFC8032TestVector1() throws {
+        let seed = hexData("9d61b19deffd5a60ba844af492ec2ce44449c5697b326919703bac031cae")
+        let expectedPublicKey = hexData("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707")
+        let expectedSignature = hexData(
+            "e5564300c360ac729086e2cc806e828a84877f1eb8d4755526a0d6a10f7719" +
+            "a2d126f9f19af2c4f7c7b4f6924a0d6c29bb918d4fdbe8d4c609c016a9d73372c8385e2c"
+        )
+        XCTAssertEqual(try testProvider.ed25519PublicKey(fromSeed: seed), expectedPublicKey)
+        let signature = try testProvider.ed25519Sign(seed: seed, message: Data())
+        XCTAssertEqual(signature, expectedSignature)
+        XCTAssertTrue(testProvider.ed25519Verify(
+            publicKey: expectedPublicKey, signature: signature, message: Data()))
+    }
+
     func testEd25519TamperedMessageFails() throws {
         let pair = try Ed25519KeyPair.generate(provider: testProvider)
         let sig = try pair.sign(Data("hello".utf8), provider: testProvider)

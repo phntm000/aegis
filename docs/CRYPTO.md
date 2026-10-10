@@ -214,6 +214,14 @@ ct   = AES-256-GCM(MK_i, aad: header, pt: pad(message))
 - **Distribution**: `groupID || epoch || senderID || chainKey || signingPub`,
   sent once per (sender, epoch), **encrypted inside each member's 1:1
   session** — never in the clear. The distribution is the crown jewels.
+- **Identity-sealed fallback (`AKD1`)**: when no 1:1 session exists with a
+  new member (e.g. they were just invited), the distribution is sealed to
+  their *identity key* instead: X25519 ECDH (ephemeral × recipient
+  identity key) → HKDF → AES-256-GCM, with the recipient's fingerprint in
+  the AAD binding the envelope to the intended identity, and an Ed25519
+  signature from the distributor verified against the group roster. The
+  joiner accepts it only if the distributor is a roster member. This keeps
+  the "never in the clear" invariant without requiring a prior 1:1 session.
 - **Epochs**: every membership change bumps the epoch; the changer
   generates a fresh sender key and distributes it. Removed members get no
   new keys (can't read new messages); added members never get old keys
