@@ -86,6 +86,7 @@ struct ConversationRowView: View {
         case .direct: return "Say hello — messages are end-to-end encrypted."
         case .group: return "Group created"
         case .channel: return "Channel created"
+        case .vault: return "Private vault — device only"
         }
     }
 
@@ -103,7 +104,7 @@ struct ConversationRowView: View {
             } else {
                 AvatarView(displayName: conversation.title, size: AegisLayout.avatarM)
             }
-        case .group, .channel:
+        case .group, .channel, .vault:
             GroupAvatarView(kind: conversation.kind, size: AegisLayout.avatarM)
         }
     }

@@ -140,6 +140,7 @@ enum StoreMapping {
         case .direct: kind = .direct
         case .group: kind = .group
         case .channel: kind = .channel
+        case .vault: kind = .vault
         }
         let sidecar = ConversationSidecar(
             subtitle: app.subtitle,
@@ -170,6 +171,7 @@ enum StoreMapping {
         case .direct: kind = .direct
         case .group: kind = .group
         case .channel, .announcement: kind = .channel
+        case .vault: kind = .vault
         }
         return Conversation(
             id: appUUID(pkg.id),
@@ -283,9 +285,9 @@ enum StoreMapping {
             mimeType: app.mimeType,
             byteCount: app.byteCount,
             chunkCount: 0,
-            keychainKeyID: attachmentKeychainID(app.id),
             remoteLocator: app.remoteLocator,
-            localRelativePath: app.localRelativePath
+            localRelativePath: app.localRelativePath,
+            keychainKeyID: attachmentKeychainID(app.id),
         )
     }
 

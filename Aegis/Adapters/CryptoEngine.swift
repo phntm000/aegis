@@ -336,7 +336,7 @@ actor CryptoEngine {
         let session = try GroupSession(
             groupID: groupID,
             founder: identity,
-            initialMembers: members.map { AegisCrypto.GroupMember(fingerprint: $0.fingerprint, displayName: "") }
+            initialMembers: members.map { CryptoGroupMember(fingerprint: $0.fingerprint, displayName: "") }
         )
         groupSessions[groupID.hexString] = session
         for member in members { knownIdentities[member.fingerprint.hexString] = member }
@@ -349,7 +349,7 @@ actor CryptoEngine {
             groupID: groupID,
             epoch: epoch,
             joiner: identity,
-            members: members.map { AegisCrypto.GroupMember(fingerprint: $0.fingerprint, displayName: "") }
+            members: members.map { CryptoGroupMember(fingerprint: $0.fingerprint, displayName: "") }
         )
         groupSessions[groupID.hexString] = session
         for member in members { knownIdentities[member.fingerprint.hexString] = member }
@@ -396,7 +396,7 @@ actor CryptoEngine {
         var out: [OutgoingDistribution] = []
         for member in add {
             knownIdentities[member.fingerprint.hexString] = member
-            out += try session.addMember(AegisCrypto.GroupMember(fingerprint: member.fingerprint, displayName: ""))
+            out += try session.addMember(CryptoGroupMember(fingerprint: member.fingerprint, displayName: ""))
         }
         for fingerprint in remove {
             out += try session.removeMember(fingerprint: fingerprint)
@@ -504,7 +504,10 @@ actor CryptoEngine {
     }
 
     func identityPublic(forFingerprint fingerprint: Data) async -> IdentityPublic? {
-        knownIdentities[fingerprint.hexString] ?? contactIdentity(fingerprint)
+        if let known = knownIdentities[fingerprint.hexString] {
+            return known
+        }
+        return await contactIdentity(fingerprint)
     }
 
     // MARK: - Backup

@@ -80,6 +80,7 @@ extension Conversation {
         case .direct: return "Direct message"
         case .group: return "Group"
         case .channel: return "Channel"
+        case .vault: return "Vault"
         }
     }
 

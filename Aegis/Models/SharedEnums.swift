@@ -53,6 +53,8 @@ enum ConversationKind: String, Sendable, Codable {
     case direct
     case group
     case channel
+    /// Local-only vault: never touches any relay or network.
+    case vault
 }
 
 /// Network reachability from the app's perspective.

@@ -22,6 +22,10 @@ import Foundation
 
 /// A group member, as known to the crypto layer. `displayName` is a UI hint
 /// only — it is never authenticated; the fingerprint is the identity.
+/// Alias: the `AegisCrypto` enum shadows the module name, so clients
+/// outside the package cannot write `AegisCrypto.GroupMember`.
+public typealias CryptoGroupMember = GroupMember
+
 public struct GroupMember: Equatable {
     /// 32-byte identity fingerprint.
     public let fingerprint: Data

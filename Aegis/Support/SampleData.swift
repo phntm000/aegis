@@ -182,13 +182,13 @@ enum SampleData {
         let g3 = Message(
             conversationID: groupDesign.id, senderID: identity.id, isFromMe: true,
             body: "Checklist is ready — sending the file",
+            status: .delivered,
             attachment: Attachment(
                 filename: "launch-checklist.pdf",
                 mimeType: "application/pdf",
                 byteCount: 184_320,
                 remoteLocator: "blob-sample-1"
             ),
-            status: .delivered,
             sentAt: now.addingTimeInterval(-4200)
         )
 
