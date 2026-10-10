@@ -1,9 +1,9 @@
 # Aegis grind state — updated by workers and the grind watchdog cron.
 # Format: key: value, one per line. Workers update current_item and last_activity_utc.
 
-current_item: phase3-calls-rooms-multidevice
-current_item_started_utc: 2026-10-10T09:40:45Z
-last_activity_utc: 2026-10-10T10:20:12Z
+current_item: hardening-audit-polish
+current_item_started_utc: 2026-10-10T10:52:20Z
+last_activity_utc: 2026-10-10T10:52:20Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -41,3 +41,5 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - watchdog 2026-10-10T10:28:00Z: remote commits landing (latest 4a0ffa45 10:20:07Z, commits every ~2-10 min 09:51-10:20Z); phase3 worker alive and iterating CI failures (runs 38042886652..38044538294 red/cancelled cycle); per liveness rules, no second worker spawned.
   - watchdog 2026-10-10T10:38:00Z: remote commits landing (latest 7510f826 10:35:44Z, ~3 min ago; cadence 10:08-10:35Z); CI runs red while worker iterates (38043896637..38045450495); per liveness rules, no worker spawned.
   - watchdog 2026-10-10T10:43:00Z: remote commits landing (latest 7510f826 10:35:44Z, ~8 min ago; cadence 09:54-10:35Z); phase3 worker alive and iterating CI failures (runs 38043026387..38045450495 red/cancelled cycle); per liveness rules, no worker spawned.
+  - watchdog 2026-10-10T10:48:00Z: remote commits landing (latest 77b64fdc 10:44:13Z, ~4 min ago; cadence 09:55-10:44Z); phase3 worker alive and iterating CI failures; per liveness rules, no worker spawned.
+  - phase3-calls-rooms-multidevice: done — voice/video calls (SAS ceremony, full-mesh audio voice rooms w/ mute/deafen/heartbeats) + multi-device (QR+SAS paired-relay model, message sync, linked-device bootstrap/onboarding) — CI green on run 38045941305 (commit 77b64fdc)
