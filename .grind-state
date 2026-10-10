@@ -1,9 +1,9 @@
 # Aegis grind state — updated by workers and the grind watchdog cron.
 # Format: key: value, one per line. Workers update current_item and last_activity_utc.
 
-current_item: fix4-call-signaling-unification
-current_item_started_utc: 2026-10-10T07:03:58Z
-last_activity_utc: 2026-10-10T07:35:00Z
+current_item: fix5-identity-change-detection
+current_item_started_utc: 2026-10-10T08:05:00Z
+last_activity_utc: 2026-10-10T08:05:00Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -27,3 +27,4 @@ notes:
   - fix1-sqlcipher-store: done — SQLCipher v4.19.0 persistent encrypted store replaces InMemoryAegisStore; CI green on run 38031227339 (commit 5c0dd5be)
   - fix2-session-persistence: done — RatchetSessionSnapshot (versioned Codable, package tests) + ratchet_session table w/ v2 migration + debounced engine persistence + restore on launch; CI green on run 38032064211 (commit 6810b5c3)
   - fix3-automatic-relay: done — honest automatic relay mode (URL validation/normalization, last-known-good fallback, no placeholder endpoint; immediate+periodic handshake health checks with Settings readout; custom-URL validation+probe on entry; new localNetworkOnly connection state + banner); CI green on run 38032828351 (commit 28e042b6, all 3 jobs)
+  - fix4-call-signaling-unification: done — call signaling unified on AegisCrypto package types (CallSignal/CallOffer/CallAnswer/IceCandidate/CallControl/KnockInfo, all Sendable; app-local duplicates deleted); CallSAS hex-string helper + package tests (KnockInfo round-trip, wire-format pinning, SAS); SAS verification ceremony wired into call flow (DTLS fingerprint tracking, SAS on CallStateEvent, ActiveCall UI with match/mismatch states); CI green on run 38033415486 (commit c7838b32)
