@@ -92,8 +92,9 @@ struct SettingsView: View {
         title: String,
         color: Color,
         @ViewBuilder destination: () -> Destination
-    ) -> some View {
-        NavigationLink(destination: destination()) {
+    ) -> AnyView {
+        AnyView(
+            NavigationLink(destination: destination()) {
             HStack(spacing: AegisLayout.m) {
                 Image(systemName: icon)
                     .font(.system(size: 15))
@@ -109,6 +110,7 @@ struct SettingsView: View {
             .padding(.vertical, 2)
         }
         .accessibilityLabel("\(title) settings")
+        )
     }
 }
 
