@@ -14,35 +14,11 @@ struct ChatListView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            VStack(spacing: 0) {
-                ConnectionBannerView()
-
-                Group {
-                    if viewModel.isLoading {
-                        LoadingOverlayView(label: "Loading conversations…")
-                    } else if viewModel.isEmpty && viewModel.searchText.isEmpty {
-                        EmptyStateView(
-                            icon: "bubble.left.and.bubble.right",
-                            title: "No conversations yet",
-                            message: "Add a contact to start your first end-to-end encrypted conversation.",
-                            actionTitle: "Add contact",
-                            action: { showingAddContact = true }
-                        )
-                    } else if viewModel.pinned.isEmpty && viewModel.recents.isEmpty
-                                && viewModel.archived.isEmpty && !viewModel.searchText.isEmpty {
-                        EmptyStateView(
-                            icon: "magnifyingglass",
-                            title: "No results",
-                            message: "No conversations match \"\(viewModel.searchText)\"."
-                        )
-                    } else {
-                        chatList
-                    }
-                }
-            }
-            .background(AegisColors.background.ignoresSafeArea())
-            .navigationTitle("Chats")
-            .navigationBarTitleDisplayMode(.large)
+            mainContent
+        }
+        .background(AegisColors.background.ignoresSafeArea())
+        .navigationTitle("Chats")
+        .navigationBarTitleDisplayMode(.large)
             .searchable(text: $viewModel.searchText, prompt: "Search conversations")
             .toolbar {
                 toolbarContent
@@ -111,6 +87,38 @@ struct ChatListView: View {
     }
 
     // MARK: - List
+
+    private var mainContent: some View {
+        VStack(spacing: 0) {
+            ConnectionBannerView()
+            listStateContent
+        }
+    }
+
+    private var listStateContent: some View {
+        Group {
+            if viewModel.isLoading {
+                LoadingOverlayView(label: "Loading conversations…")
+            } else if viewModel.isEmpty && viewModel.searchText.isEmpty {
+                EmptyStateView(
+                    icon: "bubble.left.and.bubble.right",
+                    title: "No conversations yet",
+                    message: "Add a contact to start your first end-to-end encrypted conversation.",
+                    actionTitle: "Add contact",
+                    action: { showingAddContact = true }
+                )
+            } else if viewModel.pinned.isEmpty && viewModel.recents.isEmpty
+                        && viewModel.archived.isEmpty && !viewModel.searchText.isEmpty {
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "No results",
+                    message: "No conversations match \"\(viewModel.searchText)\"."
+                )
+            } else {
+                chatList
+            }
+        }
+    }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
