@@ -29,8 +29,11 @@ import Foundation
 // MARK: - Header & message types
 
 /// The plaintext-but-authenticated header of a ratchet message.
-/// 69 bytes on the wire: `ratchetPub(32) || pn(u32 BE) || n(u32 BE)`.
+/// 40 bytes on the wire: `ratchetPub(32) || pn(u32 BE) || n(u32 BE)`.
 public struct RatchetHeader: Equatable {
+    /// Exact serialized size. Used by message parsers; kept as a constant
+    /// so encode and decode can never drift apart again.
+    public static let wireSize = 32 + 4 + 4
     /// The sender's current DH ratchet public key.
     public let ratchetPublicKey: Data
     /// Length of the sender's *previous* sending chain: tells the receiver
@@ -70,7 +73,7 @@ public struct RatchetHeader: Equatable {
 
 /// A 1:1 ratchet message (wire type `0x01`).
 ///
-/// Wire: `version u8 || 0x01 || header(69) || nonce(12) || ctLen u32 || ct || tag(16)`.
+/// Wire: `version u8 || 0x01 || header(40) || nonce(12) || ctLen u32 || ct || tag(16)`.
 /// AAD = `version || 0x01 || header` (+ application associated data).
 public struct RatchetMessage {
     public static let wireType: UInt8 = 0x01
@@ -119,7 +122,7 @@ public struct RatchetMessage {
         guard try decoder.u8() == wireType else {
             throw AegisCryptoError.invalidWireFormat
         }
-        let header = try RatchetHeader(serialized: decoder.bytes(count: 69))
+        let header = try RatchetHeader(serialized: decoder.bytes(count: RatchetHeader.wireSize))
         let nonce = try decoder.bytes(count: 12)
         let ctLength = Int(try decoder.u32())
         let ciphertext = try decoder.bytes(count: ctLength)
@@ -133,7 +136,7 @@ public struct RatchetMessage {
 /// parameters alongside the first ratchet message.
 ///
 /// Wire: `version u8 || 0x02 || ephPub(32) || usedOPK u32 || senderIdentity(65) ||`
-///       `header(69) || nonce(12) || ctLen u32 || ct || tag(16)`.
+///       `header(40) || nonce(12) || ctLen u32 || ct || tag(16)`.
 /// AAD covers the X3DH parameters too, so a relay cannot swap the ephemeral
 /// key or the claimed sender identity without failing authentication.
 public struct PreKeyMessage {
@@ -218,7 +221,7 @@ public struct PreKeyMessage {
         let ephemeralPublicKey = try decoder.bytes(count: 32)
         let usedOneTimePreKeyID = try decoder.u32()
         let senderIdentity = try IdentityPublic(serialized: decoder.bytes(count: 65))
-        let header = try RatchetHeader(serialized: decoder.bytes(count: 69))
+        let header = try RatchetHeader(serialized: decoder.bytes(count: RatchetHeader.wireSize))
         let nonce = try decoder.bytes(count: 12)
         let ctLength = Int(try decoder.u32())
         let ciphertext = try decoder.bytes(count: ctLength)

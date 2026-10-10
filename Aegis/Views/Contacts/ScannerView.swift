@@ -148,14 +148,23 @@ private final class ScannerViewController: UIViewController, AVCaptureMetadataOu
         (view.layer.sublayers?.first as? AVCaptureVideoPreviewLayer)?.frame = view.bounds
     }
 
-    func metadataOutput(
+    // Nonisolated to satisfy the delegate protocol; hops back to the main
+    // actor (the delegate queue is .main) before touching view state.
+    nonisolated func metadataOutput(
         _ output: AVCaptureMetadataOutput,
         didOutput metadataObjects: [AVMetadataObject],
         from connection: AVCaptureConnection
     ) {
-        guard !didFire,
-              let code = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+        guard let code = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               let value = code.stringValue, !value.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            self?.handleScanned(value)
+        }
+    }
+
+    @MainActor
+    private func handleScanned(_ value: String) {
+        guard !didFire else { return }
         didFire = true
         session?.stopRunning()
         onScanned?(value)

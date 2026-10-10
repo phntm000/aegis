@@ -102,6 +102,6 @@ struct NewChannelView: View {
 
 #Preview {
     let appState = AppState(factory: PreviewServiceFactory())
-    NewChannelView(appState: appState) { _ in }
+    NewChannelView { _ in }
         .environmentObject(appState)
 }

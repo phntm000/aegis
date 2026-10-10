@@ -133,6 +133,6 @@ struct NewGroupView: View {
 
 #Preview {
     let appState = AppState(factory: PreviewServiceFactory())
-    NewGroupView(appState: appState) { _ in }
+    NewGroupView { _ in }
         .environmentObject(appState)
 }
