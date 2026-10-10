@@ -429,7 +429,7 @@ public final class DeliveryCoordinator: NSObject, @unchecked Sendable {
     /// "Always" authorization and `NSLocationAlwaysAndWhenInUseUsageDescription`
     /// in Info.plist. The permission prompt must happen while foregrounded.
     public func startLocationWakes() {
-        #if canImport(CoreLocation)
+        #if os(iOS) && canImport(CoreLocation)
         guard configuration.enableLocationWakes else { return }
         let manager = CLLocationManager()
         manager.delegate = self
