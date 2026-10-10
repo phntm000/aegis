@@ -50,11 +50,13 @@ final class SealedSenderTests: XCTestCase {
             recipientMailboxID: bob.mailboxID,
             provider: testProvider
         )
-        var badCT = envelope.ciphertext
-        badCT[0] ^= 0x01
+        // NOTE: `data[0] ^= ...` directly on Data traps (SIGTRAP) on this
+        // toolchain even with valid bounds — route through [UInt8].
+        var badCTBytes = [UInt8](envelope.ciphertext)
+        badCTBytes[0] ^= 0x01
         let tampered = SealedEnvelope(
             mailboxID: envelope.mailboxID, ephemeralPublicKey: envelope.ephemeralPublicKey,
-            nonce: envelope.nonce, ciphertext: badCT, tag: envelope.tag
+            nonce: envelope.nonce, ciphertext: Data(badCTBytes), tag: envelope.tag
         )
         XCTAssertThrowsError(
             try SealedSender.open(tampered, recipient: bob, senderIdentity: alice.publicView, provider: testProvider)

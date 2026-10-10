@@ -105,7 +105,7 @@ final class PrimitiveTests: XCTestCase {
     // MARK: - Ed25519 (RFC 8032 TEST 1)
 
     func testEd25519RFC8032Vector() throws {
-        let seed = hexData("9d61b19deffd5a60ba844af492ec2cc4449c5d0b6a7d2d53d8ac4a29c170")
+        let seed = hexData("9d61b19deffd5a60ba844af492ec2cc4449c5d0b6a7d2d53d8ac4a29c170d445")
         let expectedPublic = hexData("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
         let expectedSig = hexData("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
         let publicKey = try testProvider.ed25519PublicKey(fromSeed: seed)

@@ -122,8 +122,11 @@ final class GroupTests: XCTestCase {
     func testSignatureTamperFails() throws {
         let f = try makeTwoMemberGroup()
         let sent = try f.aliceSession.encrypt(plaintext: Data("signed".utf8))
-        var badSig = sent.message.signature
-        badSig[0] ^= 0x01
+        // NOTE: `data[0] ^= ...` directly on Data traps (SIGTRAP) on this
+        // toolchain even with valid bounds — route through [UInt8].
+        var badSigBytes = [UInt8](sent.message.signature)
+        badSigBytes[0] ^= 0x01
+        let badSig = Data(badSigBytes)
         let forged = GroupMessage(
             groupID: sent.message.groupID, epoch: sent.message.epoch,
             senderID: sent.message.senderID, index: sent.message.index,

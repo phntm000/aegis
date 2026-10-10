@@ -115,12 +115,14 @@ struct IdentitySettingsView: View {
                 }
             }
 
-            Section("Danger zone") {
+            Section {
                 Button(role: .destructive) {
                     showingDeleteConfirm = true
                 } label: {
                     Label("Delete identity", systemImage: "trash.fill")
                 }
+            } header: {
+                Text("Danger zone")
             } footer: {
                 Text("Deletes your identity key and all local data, then returns to onboarding. Export a backup first if you want to keep anything.")
             }
