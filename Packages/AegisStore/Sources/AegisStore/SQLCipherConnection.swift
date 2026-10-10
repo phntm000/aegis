@@ -148,8 +148,23 @@ final class SQLCipherConnection {
 
     // MARK: - Private
 
+    /// Executes a raw SQL script, running EVERY statement it contains.
+    ///
+    /// Unlike ``exec(_:_:)`` (which prepares a single statement via
+    /// `sqlite3_prepare_v2` and silently drops the rest), this uses
+    /// `sqlite3_exec` so multi-statement schema scripts — including the
+    /// FTS5 triggers in ``StoreSchema/v1``, whose `BEGIN…END` bodies contain
+    /// inner semicolons — run in full. No bound parameters are supported.
     private func execRaw(_ sql: String) throws {
-        try exec(sql)
+        guard let db else {
+            throw AegisStoreError.ioError("database handle is closed")
+        }
+        let rc = sql.withCString { cSQL in
+            sqlite3_exec(db, cSQL, nil, nil, nil)
+        }
+        guard rc == SQLITE_OK else {
+            throw classifiedError(sql: sql)
+        }
     }
 
     private func queryRaw(_ sql: String) throws -> [SQLRow] {
