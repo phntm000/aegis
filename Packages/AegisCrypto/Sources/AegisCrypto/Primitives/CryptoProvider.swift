@@ -133,7 +133,7 @@ public struct CryptoKitProvider: CryptoProvider {
         do {
             let priv = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privateKey)
             let pub = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerPublicKey)
-            return CryptoKitDHSecret(secret: priv.sharedSecretFromKeyAgreement(with: pub))
+            return try CryptoKitDHSecret(secret: priv.sharedSecretFromKeyAgreement(with: pub))
         } catch {
             throw AegisCryptoError.invalidKeyData
         }

@@ -116,11 +116,16 @@ final class AegisStoreTests: XCTestCase {
 
         try await store.conversations.delete(id: c.id)
 
-        XCTAssertNil(try await store.conversations.fetch(id: c.id))
-        XCTAssertNil(try await store.messages.fetch(id: m.id))
-        XCTAssertNil(try await store.attachments.fetch(id: att.id))
-        XCTAssertTrue(try await store.memberships.members(of: c.id).isEmpty)
-        XCTAssertTrue(try await store.calls.list(in: c.id, limit: 10).isEmpty)
+        let convAfterDelete = try await store.conversations.fetch(id: c.id)
+        let msgAfterDelete = try await store.messages.fetch(id: m.id)
+        let attAfterDelete = try await store.attachments.fetch(id: att.id)
+        let membersAfterDelete = try await store.memberships.members(of: c.id)
+        let callsAfterDelete = try await store.calls.list(in: c.id, limit: 10)
+        XCTAssertNil(convAfterDelete)
+        XCTAssertNil(msgAfterDelete)
+        XCTAssertNil(attAfterDelete)
+        XCTAssertTrue(membersAfterDelete.isEmpty)
+        XCTAssertTrue(callsAfterDelete.isEmpty)
     }
 
     func testMarkReadClearsUnread() async throws {
@@ -194,7 +199,8 @@ final class AegisStoreTests: XCTestCase {
         let page = try await store.messages.list(in: c.id, limit: 10, before: nil)
         XCTAssertTrue(page.messages.map(\.id).contains(m.id))
         // Attachment metadata gone (keys destroyed by caller).
-        XCTAssertNil(try await store.attachments.fetch(id: att.id))
+        let attAfterDelete2 = try await store.attachments.fetch(id: att.id)
+        XCTAssertNil(attAfterDelete2)
     }
 
     func testSearchFindsTextExcludesTombstones() async throws {
@@ -236,7 +242,8 @@ final class AegisStoreTests: XCTestCase {
 
         let wiped = try await store.messages.expungeDisappeared(now: Date())
         XCTAssertEqual(wiped, 1)
-        XCTAssertNil(try await store.messages.fetch(id: gone.id))
+        let goneAfterDelete = try await store.messages.fetch(id: gone.id)
+        XCTAssertNil(goneAfterDelete)
         let remaining = try await store.messages.list(in: c.id, limit: 10, before: nil)
         XCTAssertEqual(remaining.messages.count, 1)
     }
@@ -334,18 +341,18 @@ final class AegisStoreTests: XCTestCase {
         try await store.memberships.upsert(GroupMembership(
             conversationID: c.id, userID: "mod1", role: .moderator))
 
-        XCTAssertEqual(
-            try await store.memberships.role(of: "owner1", in: c.id), .owner)
+        let ownerRole = try await store.memberships.role(of: "owner1", in: c.id)
+        XCTAssertEqual(ownerRole, .owner)
         try await store.memberships.setRole(
             conversationID: c.id, userID: "mod1", role: .admin)
-        XCTAssertEqual(
-            try await store.memberships.role(of: "mod1", in: c.id), .admin)
+        let modRole = try await store.memberships.role(of: "mod1", in: c.id)
+        XCTAssertEqual(modRole, .admin)
         XCTAssertTrue(MemberRole.admin > MemberRole.moderator)
 
         try await store.memberships.remove(
             conversationID: c.id, userID: "mod1")
-        XCTAssertNil(
-            try await store.memberships.role(of: "mod1", in: c.id))
+        let modRoleAfterRemove = try await store.memberships.role(of: "mod1", in: c.id)
+        XCTAssertNil(modRoleAfterRemove)
     }
 
     func testConversationsContainingUser() async throws {
@@ -430,8 +437,10 @@ final class AegisStoreTests: XCTestCase {
                 id: "txuser", displayName: "Tx",
                 identityKeyFingerprint: "SHA256:tx"))
         }
-        XCTAssertNotNil(try await store.conversations.fetch(id: c.id))
-        XCTAssertNotNil(try await store.contacts.fetch(id: "txuser"))
+        let txConv = try await store.conversations.fetch(id: c.id)
+        let txContact = try await store.contacts.fetch(id: "txuser")
+        XCTAssertNotNil(txConv)
+        XCTAssertNotNil(txContact)
     }
 }
 
