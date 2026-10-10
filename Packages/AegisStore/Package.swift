@@ -37,6 +37,14 @@ let package = Package(
                 // Required: codec registration hooks (hard #error without).
                 .define("SQLITE_EXTRA_INIT", to: "sqlcipher_extra_init"),
                 .define("SQLITE_EXTRA_SHUTDOWN", to: "sqlcipher_extra_shutdown"),
+                // NDEBUG: the amalgamation's own documented default. SwiftPM
+                // debug builds do not define SQLITE_DEBUG (which the
+                // assert() bodies and debug-only struct members require),
+                // so pin the release behavior explicitly: asserts compiled
+                // out, no debug-only struct layouts. Without this, clang
+                // parses assert() bodies against structs lacking their
+                // SQLITE_DEBUG members (EdupBuf.zEnd, Parse.isCreate, ...).
+                .define("NDEBUG"),
                 // Encrypted full-text search lives inside the same DB file.
                 .define("SQLITE_ENABLE_FTS5"),
                 // No loadable extensions in the encrypted store, ever.
