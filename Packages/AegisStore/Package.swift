@@ -6,11 +6,12 @@
 //  SQLCipher-backed production adapter (`SQLCipherAegisStore`).
 //
 //  SQLCipher is vendored as the `CSQLCipher` C target: the amalgamation
-//  (sqlite3.c / sqlite3.h) is generated from the SQLCipher sources and
-//  compiled with SQLITE_HAS_CODEC + SQLCIPHER_CRYPTO_CC, so encryption is
-//  provided by Apple's CommonCrypto with no extra dependency on Apple
-//  platforms. See Sources/AegisStore/Docs/SQLCIPHER.md for the key
-//  management and schema design.
+//  (sqlite3.c / sqlite3.h, SQLCipher v4.19.0 / SQLite 3.53.4, generated from
+//  the v4.19.0 release tag — never a moving master) is compiled with
+//  SQLITE_HAS_CODEC + SQLCIPHER_CRYPTO_CC, so encryption is provided by
+//  Apple's CommonCrypto with no extra dependency on Apple platforms.
+//  See Sources/AegisStore/Docs/SQLCIPHER.md for the key management and
+//  schema design.
 
 import PackageDescription
 
@@ -33,6 +34,9 @@ let package = Package(
                 .define("SQLITE_HAS_CODEC"),
                 // Use CommonCrypto (Apple platforms) as the crypto provider.
                 .define("SQLCIPHER_CRYPTO_CC"),
+                // Required: codec registration hooks (hard #error without).
+                .define("SQLITE_EXTRA_INIT", to: "sqlcipher_extra_init"),
+                .define("SQLITE_EXTRA_SHUTDOWN", to: "sqlcipher_extra_shutdown"),
                 // Encrypted full-text search lives inside the same DB file.
                 .define("SQLITE_ENABLE_FTS5"),
                 // No loadable extensions in the encrypted store, ever.
