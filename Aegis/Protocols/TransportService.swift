@@ -152,6 +152,9 @@ struct PendingIdentityChange: Sendable, Hashable, Codable {
     /// re-verification UI).
     let newIdentityKey: Data
     let detectedAt: Date
+    /// The user explicitly dismissed the banner: held messages are shown,
+    /// but the contact stays flagged until re-verified.
+    var dismissed: Bool = false
 }
 
 protocol TransportService: Sendable {

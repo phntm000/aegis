@@ -577,9 +577,9 @@ actor AegisCore {
         let conversationID: UUID
         var supersedes: Data? = nil
         if let previous = Self.rotationHint(in: plaintext),
-           await isKnownContact(fingerprint: previous)
+           let target = await linkTargetForHint(previous)
         {
-            conversationID = try await directConversationID(for: previous)
+            conversationID = target
             supersedes = previous
         } else {
             conversationID = try await directConversationID(for: initiatorFP)
@@ -615,6 +615,23 @@ actor AegisCore {
         return contacts.contains { $0.identityKeyFingerprint == hex }
     }
 
+    /// Finds the conversation a rotation hint links to: the hinted contact's
+    /// DM conversation, or the conversation already tracking that hint as a
+    /// pending new identity (rotations chain instead of forking).
+    private func linkTargetForHint(_ hint: Data) async -> UUID? {
+        if await isKnownContact(fingerprint: hint) {
+            return try? await directConversationID(for: hint)
+        }
+        let conversations = (try? await pkgStore.conversations.list(includeArchived: true, kind: .direct, query: nil)) ?? []
+        for conversation in conversations {
+            let id = appUUID(conversation.id)
+            if await sidecars.load(id: id).pendingIdentityChange?.newFingerprint == hint {
+                return id
+            }
+        }
+        return nil
+    }
+
     // MARK: - Identity-change tracking (TransportService)
 
     /// Records a peer identity change: repoints the conversation's routing
@@ -632,19 +649,23 @@ actor AegisCore {
     }
 
     /// Clears the identity-change state after the user re-verified (adopting
-    /// the new key) or explicitly dismissed (keeping the old key on the
-    /// contact). With `adoptNewKey=false` routing returns to the previous
-    /// identity; the contact stays flagged until re-verified.
+    /// the new key). With `adoptNewKey=false` the user dismissed the banner:
+    /// the pending state is kept (marked dismissed) so the new key stays
+    /// available for later re-verification, held messages are shown, and
+    /// routing stays on the new identity — but the contact remains flagged.
     func resolveIdentityChange(conversationID: UUID, adoptNewKey: Bool) async {
         var sidecar = await sidecars.load(id: conversationID)
-        guard let change = sidecar.pendingIdentityChange else { return }
-        if !adoptNewKey {
-            sidecar.dmPeerFingerprint = change.previousFingerprint
-            if let peer = await engine.identityPublic(forFingerprint: change.previousFingerprint) {
+        guard var change = sidecar.pendingIdentityChange else { return }
+        if adoptNewKey {
+            sidecar.pendingIdentityChange = nil
+        } else {
+            if let peer = await engine.identityPublic(forFingerprint: change.newFingerprint) {
                 try? await bindDirect(peer: peer)
             }
+            sidecar.dmPeerFingerprint = change.newFingerprint
+            change.dismissed = true
+            sidecar.pendingIdentityChange = change
         }
-        sidecar.pendingIdentityChange = nil
         try? await sidecars.save(id: conversationID, sidecar: sidecar)
     }
 

@@ -63,3 +63,32 @@ targets:
         ENABLE_APP_TRANSPORT_SECURITY: YES
     info:
       path: Aegis/Info.plist
+
+  # Unit tests for app-layer logic (crypto engine, adapters). Runs on the
+  # iOS simulator in CI via `xcodebuild test`.
+  AegisTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AegisTests
+    dependencies:
+      - target: Aegis
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.tests
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  Aegis:
+    build:
+      targets:
+        Aegis: all
+    test:
+      targets:
+        - AegisTests
+    run:
+      config: Debug

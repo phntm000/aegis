@@ -10,6 +10,7 @@ struct ConversationView: View {
     @State private var showingInfo = false
     @State private var showingTimerSheet = false
     @State private var showingCallChoice = false
+    @State private var showingSafetyNumber = false
 
     init(conversation: Conversation, contact: Contact?, appState: AppState) {
         _viewModel = StateObject(wrappedValue: ConversationViewModel(
@@ -21,11 +22,20 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             ConnectionBannerView()
 
-            if let contact = viewModel.contact,
+            if let contact = viewModel.displayContact,
                contact.verification == .identityChanged {
-                IdentityChangedBanner {
-                    showingInfo = true
-                }
+                IdentityChangedBanner(
+                    onVerify: { showingSafetyNumber = true },
+                    onDismiss: {
+                        // Dismiss is offered only while the change is still
+                        // pending (not yet dismissed): after dismissal the
+                        // banner stays as a warning without the action.
+                        guard let pending = viewModel.pendingIdentityChange,
+                              !pending.dismissed
+                        else { return nil }
+                        return { Task { @MainActor in await viewModel.dismissIdentityChangeWarning() } }
+                    }()
+                )
                 .padding(.top, AegisLayout.s)
             }
 
@@ -79,6 +89,16 @@ struct ConversationView: View {
         .sheet(isPresented: $showingInfo) {
             ConversationInfoView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showingSafetyNumber) {
+            if let contact = viewModel.displayContact {
+                SafetyNumberView(
+                    contact: contact,
+                    appState: appState,
+                    pendingIdentityKey: viewModel.pendingIdentityChange?.newIdentityKey,
+                    conversationID: viewModel.conversation.id
+                )
+            }
+        }
         .sheet(isPresented: $showingTimerSheet) {
             DisappearingTimerSheet(viewModel: viewModel)
         }
@@ -87,6 +107,13 @@ struct ConversationView: View {
         }
         .onDisappear {
             viewModel.onDisappear()
+        }
+        .onChange(of: showingSafetyNumber) { _, showing in
+            // Re-verification or dismissal inside the sheet changes the
+            // contact and pending state behind this view's back.
+            if !showing {
+                Task { @MainActor in await viewModel.refreshIdentityChangeState() }
+            }
         }
         .task { @MainActor in
             await viewModel.refreshConversation()
@@ -126,7 +153,7 @@ struct ConversationView: View {
         Group {
             if viewModel.isLoading {
                 LoadingOverlayView(label: "Loading messages…")
-            } else if let error = viewModel.loadError, viewModel.messages.isEmpty {
+            } else if let error = viewModel.loadError, viewModel.visibleMessages.isEmpty {
                 EmptyStateView(
                     icon: "exclamationmark.triangle",
                     title: "Couldn't load messages",
@@ -134,7 +161,7 @@ struct ConversationView: View {
                     actionTitle: "Retry",
                     action: { Task { @MainActor in await viewModel.load() } }
                 )
-            } else if viewModel.messages.isEmpty {
+            } else if viewModel.visibleMessages.isEmpty {
                 EmptyStateView(
                     icon: "lock.shield",
                     title: "No messages yet",
@@ -154,15 +181,15 @@ struct ConversationView: View {
                         ProgressView()
                             .tint(AegisColors.accent)
                             .padding(.vertical, AegisLayout.s)
-                    } else if !viewModel.messages.isEmpty {
+                    } else if !viewModel.visibleMessages.isEmpty {
                         // Invisible sentinel that triggers pagination.
                         Color.clear
                             .frame(height: 1)
                             .onAppear { Task { @MainActor in await viewModel.loadMore() } }
                     }
 
-                    ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
-                        let previous = index > 0 ? viewModel.messages[index - 1] : nil
+                    ForEach(Array(viewModel.visibleMessages.enumerated()), id: \.element.id) { index, message in
+                        let previous = index > 0 ? viewModel.visibleMessages[index - 1] : nil
                         if shouldShowDayHeader(message, after: previous) {
                             dayHeader(for: message.sentAt)
                         }
@@ -185,7 +212,7 @@ struct ConversationView: View {
                 .padding(.horizontal, AegisLayout.l)
                 .padding(.vertical, AegisLayout.s)
             }
-            .onChange(of: viewModel.messages.count) { _, _ in
+            .onChange(of: viewModel.visibleMessages.count) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
             .onChange(of: viewModel.isLoading) { _, loading in
@@ -198,7 +225,7 @@ struct ConversationView: View {
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool) {
-        guard let last = viewModel.messages.last else { return }
+        guard let last = viewModel.visibleMessages.last else { return }
         if animated {
             withAnimation(.easeOut(duration: 0.25)) {
                 proxy.scrollTo(last.id, anchor: .bottom)

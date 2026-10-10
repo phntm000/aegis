@@ -85,9 +85,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build app (simulator, unsigned)
+      - name: Build & test app (simulator, unsigned)
         run: >
-          xcodebuild build
+          xcodebuild test
           -project Aegis.xcodeproj
           -scheme Aegis
           -configuration Debug

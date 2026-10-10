@@ -261,29 +261,37 @@ final class AppState: ObservableObject {
         guard let conversation = try? await store.fetchConversation(id: conversationID),
               conversation.kind == .direct
         else { return false }
-        // Already flagged for this exact new identity: not a new change —
-        // the pending check below holds the message.
-        if let pending = await transport.pendingIdentityChange(for: conversationID),
-           pending.newFingerprint == senderFP
-        {
-            return false
+        // The currently effective peer key: the pending new identity when a
+        // change is already flagged (rotations chain: K1→K2→K3 re-flags),
+        // else the contact's stored key.
+        let pending = await transport.pendingIdentityChange(for: conversationID)
+        let effectiveFP: Data
+        let contact: Contact?
+        if let pending {
+            effectiveFP = pending.newFingerprint
+            contact = await contactForFingerprint(pending.previousFingerprint)
+                ?? await contactForFingerprint(supersedes ?? expectedFingerprint)
+        } else {
+            // The contact this conversation belongs to: the hinted previous
+            // identity when the sender rotated, else the expected route peer
+            // (covers prekeys arriving on an established peer's route).
+            let contactFP = supersedes ?? expectedFingerprint
+            contact = await contactForFingerprint(contactFP)
+            guard let contact,
+                  let storedFP = Self.fingerprint(ofSerializedIdentity: contact.identityKey)
+            else { return false }
+            effectiveFP = storedFP
         }
-        // The contact this conversation belongs to: the hinted previous
-        // identity when the sender rotated, else the expected route peer
-        // (covers prekeys arriving on an established peer's route).
-        let contactFP = supersedes ?? expectedFingerprint
-        guard let contact = await contactForFingerprint(contactFP),
-              let storedFP = Self.fingerprint(ofSerializedIdentity: contact.identityKey),
-              storedFP != senderFP
-        else { return false }
-        // The authenticated sender differs from the contact's stored key:
-        // flag the contact, banner the conversation, and hold the message.
+        guard let contact, effectiveFP != senderFP else { return false }
+        // The authenticated sender differs from the effective key: flag the
+        // contact, banner the conversation, and hold the message. The user
+        // re-verifies (adopting the new key) or explicitly dismisses.
         var updated = contact
         updated.verification = .identityChanged
         try? await store.saveContact(updated)
         await transport.noteIdentityChange(
             PendingIdentityChange(
-                previousFingerprint: storedFP,
+                previousFingerprint: effectiveFP,
                 newFingerprint: senderFP,
                 newIdentityKey: senderIdentity,
                 detectedAt: receivedAt
@@ -298,11 +306,12 @@ final class AppState: ObservableObject {
         return true
     }
 
-    /// Whether display is currently paused for this conversation: a pending
-    /// identity change whose new identity matches the sender.
+    /// Whether display is currently paused for this conversation: a pending,
+    /// not-dismissed identity change whose new identity matches the sender.
     private func isIdentityChangePending(for conversationID: UUID, senderIdentity: Data) async -> Bool {
         guard let senderFP = Self.fingerprint(ofSerializedIdentity: senderIdentity),
-              let pending = await transport.pendingIdentityChange(for: conversationID)
+              let pending = await transport.pendingIdentityChange(for: conversationID),
+              !pending.dismissed
         else { return false }
         return pending.newFingerprint == senderFP
     }

@@ -23,10 +23,28 @@ final class ConversationViewModel: ObservableObject {
     @Published var transfers: [UUID: TransferState] = [:]
     @Published var messageForInfo: Message?
     @Published private(set) var contactsByID: [UUID: Contact] = [:]
+    /// Set while the peer's identity change is unverified: the banner shows
+    /// and new peer messages are held (not rendered) until resolve.
+    @Published private(set) var pendingIdentityChange: PendingIdentityChange?
 
     @Published private(set) var conversation: Conversation
 
     let contact: Contact?
+
+    /// The contact as currently known (refreshes when flagged), for
+    /// verification UI.
+    var displayContact: Contact? {
+        guard let contact else { return nil }
+        return contactsByID[contact.id] ?? contact
+    }
+
+    /// Messages rendered in the thread: while an identity change is pending
+    /// (and not dismissed), peer messages at/after detection are held back
+    /// until the user re-verifies or explicitly dismisses.
+    var visibleMessages: [Message] {
+        guard let pending = pendingIdentityChange, !pending.dismissed else { return messages }
+        return messages.filter { $0.isFromMe || $0.sentAt < pending.detectedAt }
+    }
 
     // MARK: - Private
 
@@ -55,6 +73,7 @@ final class ConversationViewModel: ObservableObject {
         Task { @MainActor in
             await load()
             await markAsRead()
+            await refreshIdentityChangeState()
         }
     }
 
@@ -553,9 +572,33 @@ final class ConversationViewModel: ObservableObject {
                 self.upsert(message)
                 Task { @MainActor [weak self] in
                     await self?.markAsRead()
+                    // The identity-change notice arrives here too: refresh
+                    // the banner / held-message state.
+                    await self?.refreshIdentityChangeState()
                 }
             }
             .store(in: &cancellables)
+    }
+
+    /// Re-reads the pending identity-change state and the contact's
+    /// verification, so the banner and held messages react to flagging,
+    /// re-verification, and dismissal.
+    func refreshIdentityChangeState() async {
+        pendingIdentityChange = await transport.pendingIdentityChange(for: conversation.id)
+        if let contact {
+            let contacts = (try? await store.fetchContacts()) ?? []
+            if let fresh = contacts.first(where: { $0.id == contact.id }) {
+                contactsByID[fresh.id] = fresh
+            }
+        }
+    }
+
+    /// Explicit user dismissal of the identity-change banner: held messages
+    /// are shown, the contact stays flagged until re-verified.
+    func dismissIdentityChangeWarning() async {
+        await transport.resolveIdentityChange(conversationID: conversation.id, adoptNewKey: false)
+        Haptics.impact(.medium)
+        await refreshIdentityChangeState()
     }
 
     // MARK: - Disappearing messages

@@ -3,17 +3,41 @@ import SwiftUI
 /// Safety-number verification: the out-of-band trust ceremony. The user
 /// compares these numbers with the contact (in person or over a trusted
 /// channel) and marks the contact verified only when they match.
+///
+/// When `pendingIdentityKey` is set, the contact's identity changed: the
+/// view shows the NEW (unverified) key's numbers, and confirming adopts it.
 struct SafetyNumberView: View {
     let contact: Contact
+    /// The new 65-byte serialized identity key awaiting verification.
+    /// Nil for the normal (unchanged-key) ceremony.
+    let pendingIdentityKey: Data?
+    /// The 1:1 conversation awaiting re-verification, if any: confirming or
+    /// dismissing clears its pending identity-change state.
+    let conversationID: UUID?
+    private let appState: AppState
     @StateObject private var viewModel: ContactsViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingMismatchConfirm = false
 
-    init(contact: Contact, appState: AppState) {
+    init(contact: Contact, appState: AppState, pendingIdentityKey: Data? = nil, conversationID: UUID? = nil) {
         self.contact = contact
+        self.pendingIdentityKey = pendingIdentityKey
+        self.conversationID = conversationID
+        self.appState = appState
         _viewModel = StateObject(wrappedValue: ContactsViewModel(appState: appState))
     }
+
+    /// The contact as displayed: with the pending new key when re-verifying
+    /// after an identity change.
+    private var displayContact: Contact {
+        guard let pendingIdentityKey else { return contact }
+        var c = contact
+        c.identityKey = pendingIdentityKey
+        return c
+    }
+
+    private var isReverification: Bool { pendingIdentityKey != nil }
 
     var body: some View {
         NavigationStack {
@@ -22,14 +46,19 @@ struct SafetyNumberView: View {
                     header
 
                     VStack(alignment: .leading, spacing: AegisLayout.s) {
-                        Text("Safety number")
+                        Text("Safety number" + (isReverification ? " — new key" : ""))
                             .font(AegisType.captionStrong)
                             .foregroundStyle(AegisColors.textSecondary)
-                        Text(Formatters.groupedFingerprint(viewModel.safetyNumber(for: contact)))
+                        Text(Formatters.groupedFingerprint(viewModel.safetyNumber(for: displayContact)))
                             .font(AegisType.fingerprintLarge)
                             .foregroundStyle(AegisColors.textPrimary)
                             .textSelection(.enabled)
                             .lineSpacing(6)
+                        if isReverification {
+                            Text("This is the new identity key \(contact.displayName) is now using. It is not verified yet — compare it with them directly before confirming.")
+                                .font(AegisType.caption)
+                                .foregroundStyle(AegisColors.warning)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(AegisLayout.l)
@@ -37,10 +66,10 @@ struct SafetyNumberView: View {
                     .clipShape(RoundedRectangle(cornerRadius: AegisLayout.radiusL))
 
                     VStack(alignment: .leading, spacing: AegisLayout.s) {
-                        Text("\(contact.displayName)'s fingerprint")
+                        Text("\(contact.displayName)'s fingerprint" + (isReverification ? " — new key" : ""))
                             .font(AegisType.captionStrong)
                             .foregroundStyle(AegisColors.textSecondary)
-                        Text(Formatters.groupedFingerprint(viewModel.fingerprint(for: contact)))
+                        Text(Formatters.groupedFingerprint(viewModel.fingerprint(for: displayContact)))
                             .font(AegisType.fingerprint)
                             .foregroundStyle(AegisColors.textPrimary)
                             .textSelection(.enabled)
@@ -58,7 +87,17 @@ struct SafetyNumberView: View {
                     if contact.verification != .verified {
                         Button {
                             Task { @MainActor in
-                                await viewModel.markVerified(contact)
+                                if let newKey = pendingIdentityKey {
+                                    await viewModel.confirmIdentityChange(contact, newIdentityKey: newKey)
+                                    if let conversationID {
+                                        await appState.transport.resolveIdentityChange(
+                                            conversationID: conversationID,
+                                            adoptNewKey: true
+                                        )
+                                    }
+                                } else {
+                                    await viewModel.markVerified(contact)
+                                }
                                 dismiss()
                             }
                         } label: {

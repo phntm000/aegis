@@ -41,33 +41,45 @@ struct VerificationShieldView: View {
 /// identity key changed since verification. Tapping opens SafetyNumberView.
 struct IdentityChangedBanner: View {
     var onVerify: () -> Void
+    var onDismiss: (() -> Void)?
 
     var body: some View {
-        Button(action: onVerify) {
-            HStack(spacing: AegisLayout.s) {
-                Image(systemName: "exclamationmark.shield.fill")
-                    .foregroundStyle(AegisColors.warning)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Safety number changed")
-                        .font(AegisType.captionStrong)
-                        .foregroundStyle(AegisColors.textPrimary)
-                    Text("This contact's identity key changed. Verify before sharing anything sensitive.")
+        VStack(spacing: 0) {
+            Button(action: onVerify) {
+                HStack(spacing: AegisLayout.s) {
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .foregroundStyle(AegisColors.warning)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Safety number changed — tap to re-verify")
+                            .font(AegisType.captionStrong)
+                            .foregroundStyle(AegisColors.textPrimary)
+                        Text("This contact's identity key changed. Verify before sharing anything sensitive.")
+                            .font(AegisType.caption)
+                            .foregroundStyle(AegisColors.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
                         .font(AegisType.caption)
-                        .foregroundStyle(AegisColors.textSecondary)
+                        .foregroundStyle(AegisColors.textTertiary)
+                        .accessibilityHidden(true)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(AegisType.caption)
-                    .foregroundStyle(AegisColors.textTertiary)
-                    .accessibilityHidden(true)
+                .padding(AegisLayout.m)
             }
-            .padding(AegisLayout.m)
-            .background(AegisColors.warning.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: AegisLayout.radiusM))
-            .padding(.horizontal, AegisLayout.l)
+            .accessibilityLabel("Safety number changed. Tap to re-verify.")
+            if let onDismiss {
+                Divider()
+                Button("Dismiss — show messages anyway", action: onDismiss)
+                    .font(AegisType.captionStrong)
+                    .foregroundStyle(AegisColors.textSecondary)
+                    .frame(maxWidth: .infinity, minHeight: AegisLayout.minTapTarget)
+                    .accessibilityLabel("Dismiss identity change warning")
+                    .accessibilityHint("Shows new messages without verifying the new key. The contact stays flagged.")
+            }
         }
-        .accessibilityLabel("Safety number changed. Tap to verify.")
+        .background(AegisColors.warning.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: AegisLayout.radiusM))
+        .padding(.horizontal, AegisLayout.l)
     }
 }
 

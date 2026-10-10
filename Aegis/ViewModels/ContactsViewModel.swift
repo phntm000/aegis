@@ -131,6 +131,22 @@ final class ContactsViewModel: ObservableObject {
         }
     }
 
+    /// The user verified the NEW key after an identity change: adopt it as
+    /// the contact's key and mark verified. The old key is superseded.
+    /// Callers clear the conversation's pending identity-change state after.
+    func confirmIdentityChange(_ contact: Contact, newIdentityKey: Data) async {
+        var updated = contact
+        updated.identityKey = newIdentityKey
+        updated.verification = .verified
+        do {
+            try await appState.store.saveContact(updated)
+            replace(updated)
+            Haptics.notification(.success)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     /// The key changed: surface the warning until the user re-verifies.
     func flagIdentityChanged(_ contact: Contact) async {
         var updated = contact

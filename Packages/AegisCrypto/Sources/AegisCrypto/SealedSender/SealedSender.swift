@@ -336,7 +336,9 @@ public enum SealedSender {
 
     // MARK: - Internal
 
-    private static func sealedSenderKey(
+    /// Visible for tests (forgery tests need to mint envelopes with
+    /// mismatched certificates); not public API.
+    static func sealedSenderKey(
         privateKey: Data,
         peerPublicKey: Data,
         mailboxID: Data,
