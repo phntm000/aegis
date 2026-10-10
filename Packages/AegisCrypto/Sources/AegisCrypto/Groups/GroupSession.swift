@@ -242,9 +242,12 @@ public final class GroupSession {
         let padded = Padding.pad(plaintext)
         let sealed = try AEAD.seal(plaintext: padded, key: key, associatedData: aad, provider: provider)
 
+        // Wire format carries AES-GCM in combined mode: ciphertext || 16-byte
+        // tag. The signature covers exactly these wire bytes.
+        let wireCiphertext = sealed.ciphertext + sealed.tag
         var signingInput = GroupMessage.headerBytes(groupID: groupID, epoch: epoch, senderID: ourFingerprint, index: index)
         signingInput.append(sealed.nonce)
-        signingInput.append(sealed.ciphertext)
+        signingInput.append(wireCiphertext)
         let signature = try senderKey.sign(signingInput, provider: provider)
 
         let message = GroupMessage(
@@ -253,7 +256,7 @@ public final class GroupSession {
             senderID: ourFingerprint,
             index: index,
             nonce: sealed.nonce,
-            ciphertext: sealed.ciphertext,
+            ciphertext: wireCiphertext,
             signature: signature
         )
         return EncryptedGroupMessage(message: message, keyRotation: keyRotation)
@@ -351,7 +354,13 @@ public final class GroupSession {
         // 3. Decrypt + unpad.
         var aad = message.headerBytes()
         aad.append(associatedData)
-        let sealed = SealedMessage(nonce: message.nonce, ciphertext: message.ciphertext, tag: message.tag)
+        // Wire format carries AES-GCM in combined mode: ciphertext || 16-byte tag.
+        guard message.ciphertext.count >= 16 else { throw AegisCryptoError.invalidWireFormat }
+        let sealed = SealedMessage(
+            nonce: message.nonce,
+            ciphertext: message.ciphertext.dropLast(16),
+            tag: message.ciphertext.suffix(16)
+        )
         let padded = try AEAD.open(sealed, key: messageKey, associatedData: aad, provider: provider)
         return try Padding.unpad(padded)
     }
