@@ -35,6 +35,7 @@ enum DeviceLinkChannel: Sendable {
 actor DeviceLinkManager {
 
     private let log = Logger(subsystem: "app.aegis.ios", category: "devicelink")
+    /// Assigned via setCore after AegisCore finishes init.
     private weak var core: AegisCore?
     private let provider = CryptoKitProvider.shared
 
@@ -84,8 +85,7 @@ actor DeviceLinkManager {
 
     private var pairing: PairingAttempt?
 
-    init(core: AegisCore) {
-        self.core = core
+    init() {
         if let data = UserDefaults.standard.data(forKey: Keys.linkedDevices),
            let devices = try? JSONDecoder().decode([DeviceInfo].self, from: data) {
             self.linkedDevices = devices
@@ -96,11 +96,14 @@ actor DeviceLinkManager {
         let (syncStream, syncCont) = AsyncStream<SyncEvent>.makeStream()
         self.syncEvents = syncStream
         self.syncEventCont = syncCont
-        // Re-bind the paired mailbox on launch so a linked device keeps
-        // receiving after restart (keys live in the keychain).
-        Task { [weak self] in
-            await self?.rebindPairedMailboxes()
-        }
+    }
+
+    /// Called once by AegisCore after its init completes. Re-binds the
+    /// paired mailbox so a linked device keeps receiving after restart
+    /// (channel keys live in the keychain).
+    func setCore(_ core: AegisCore) async {
+        self.core = core
+        await rebindPairedMailboxes()
     }
 
     /// Re-binds every known paired-channel mailbox. Actor-isolated so the

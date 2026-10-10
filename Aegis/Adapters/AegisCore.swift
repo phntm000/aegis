@@ -326,9 +326,15 @@ actor AegisCore {
         // Self-boot: the ServiceFactory protocol has no async hook, so the
         // core starts its transports and inbound dispatch on creation. The
         // app's AppState.bootstrap() then drives relay configuration.
-        self.voiceRooms = VoiceRoomManager(core: self)
-        self.deviceLink = DeviceLinkManager(core: self)
-        Task { [weak self] in try? await self?.start() }
+        self.voiceRooms = VoiceRoomManager()
+        self.deviceLink = DeviceLinkManager()
+        Task { [weak self] in
+            guard let self else { return }
+            // Cross-actor wiring must happen after init completes.
+            await self.voiceRooms.setCore(self)
+            await self.deviceLink.setCore(self)
+            try? await self.start()
+        }
     }
 
     // MARK: - Voice rooms

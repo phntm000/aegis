@@ -26,7 +26,8 @@ actor VoiceRoomManager {
     private let log = Logger(subsystem: "app.aegis.ios", category: "voiceroom")
 
     /// Back-reference to the core for group-channel sends, the media
-    /// engine, and local identity. Weak to avoid a retain cycle.
+    /// engine, and local identity. Weak to avoid a retain cycle. Assigned
+    /// via setCore after AegisCore finishes init.
     private weak var core: AegisCore?
 
     private var room: VoiceRoom?
@@ -39,11 +40,15 @@ actor VoiceRoomManager {
     private let eventCont: AsyncStream<VoiceRoomEvent>.Continuation
     let events: AsyncStream<VoiceRoomEvent>
 
-    init(core: AegisCore) {
-        self.core = core
+    init() {
         let (stream, cont) = AsyncStream<VoiceRoomEvent>.makeStream()
         self.events = stream
         self.eventCont = cont
+    }
+
+    /// Called once by AegisCore after its init completes.
+    func setCore(_ core: AegisCore) {
+        self.core = core
     }
 
     private func media() async -> (any CallMediaDelegate)? {
