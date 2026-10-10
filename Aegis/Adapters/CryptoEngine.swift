@@ -483,13 +483,20 @@ actor CryptoEngine {
             let message = try PreKeyMessage.parse(inner)
             let opk = manager.consumeOneTimePreKey(message.usedOneTimePreKeyID)
             if sessions[key] != nil,
+               message.senderIdentity.fingerprint == peer.fingerprint,
                identity.fingerprint.lexicographicallyPrecedes(peer.fingerprint)
             {
-                // Simultaneous initiation: deterministic convergence. We
-                // are the winner, so we keep our session — but we still
-                // decrypt the loser's first message via a one-shot session
-                // so it is not silently lost. The peer converges onto our
-                // session when it sees our prekey message.
+                // Simultaneous initiation with the SAME peer: deterministic
+                // convergence. We are the winner, so we keep our session —
+                // but we still decrypt the loser's first message via a
+                // one-shot session so it is not silently lost. The peer
+                // converges onto our session when it sees our prekey message.
+                //
+                // The initiator check matters: if the X3DH-authenticated
+                // sender is a DIFFERENT identity than the expected peer, this
+                // is not simultaneous initiation — it is an identity change
+                // (or an attack). Fall through so the true initiator is
+                // reported and the app layer can surface the warning.
                 let oneShot = try SessionEstablishment.respond(
                     preKeyMessageWire: inner,
                     ourIdentity: identity,
