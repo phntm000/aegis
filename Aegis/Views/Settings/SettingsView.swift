@@ -86,9 +86,7 @@ struct SettingsView: View {
         color: Color,
         @ViewBuilder destination: () -> Destination
     ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
+        NavigationLink(destination: destination()) {
             HStack(spacing: AegisLayout.m) {
                 Image(systemName: icon)
                     .font(.system(size: 15))

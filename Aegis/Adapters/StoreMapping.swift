@@ -287,7 +287,7 @@ enum StoreMapping {
             chunkCount: 0,
             remoteLocator: app.remoteLocator,
             localRelativePath: app.localRelativePath,
-            keychainKeyID: attachmentKeychainID(app.id),
+            keychainKeyID: attachmentKeychainID(app.id)
         )
     }
 
