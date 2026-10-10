@@ -269,8 +269,11 @@ final class AppState: ObservableObject {
         let contact: Contact?
         if let pending {
             effectiveFP = pending.newFingerprint
-            contact = await contactForFingerprint(pending.previousFingerprint)
-                ?? await contactForFingerprint(supersedes ?? expectedFingerprint)
+            if let byPrevious = await contactForFingerprint(pending.previousFingerprint) {
+                contact = byPrevious
+            } else {
+                contact = await contactForFingerprint(supersedes ?? expectedFingerprint)
+            }
         } else {
             // The contact this conversation belongs to: the hinted previous
             // identity when the sender rotated, else the expected route peer
