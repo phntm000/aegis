@@ -508,15 +508,18 @@ final class SQLCipherStoreTests: XCTestCase {
         let fp = String(repeating: "ab", count: 32)
         let blob = Data("opaque-snapshot-bytes".utf8)
         try await store.sessions.save(fingerprint: fp, snapshot: blob)
-        XCTAssertEqual(try await store.sessions.load(fingerprint: fp), blob)
-        XCTAssertNil(try await store.sessions.load(fingerprint: String(repeating: "cd", count: 32)))
+        let loaded = try await store.sessions.load(fingerprint: fp)
+        XCTAssertEqual(loaded, blob)
+        let missing = try await store.sessions.load(fingerprint: String(repeating: "cd", count: 32))
+        XCTAssertNil(missing)
     }
 
     func testSessionSaveOverwrites() async throws {
         let fp = String(repeating: "ab", count: 32)
         try await store.sessions.save(fingerprint: fp, snapshot: Data([0x01]))
         try await store.sessions.save(fingerprint: fp, snapshot: Data([0x02]))
-        XCTAssertEqual(try await store.sessions.load(fingerprint: fp), Data([0x02]))
+        let loaded = try await store.sessions.load(fingerprint: fp)
+        XCTAssertEqual(loaded, Data([0x02]))
     }
 
     func testSessionLoadAllAndDelete() async throws {
@@ -529,11 +532,14 @@ final class SQLCipherStoreTests: XCTestCase {
         XCTAssertEqual(all[fp1], Data([0x01]))
 
         try await store.sessions.delete(fingerprint: fp1)
-        XCTAssertNil(try await store.sessions.load(fingerprint: fp1))
-        XCTAssertEqual(try await store.sessions.loadAll().count, 1)
+        let deleted = try await store.sessions.load(fingerprint: fp1)
+        XCTAssertNil(deleted)
+        let remaining = try await store.sessions.loadAll()
+        XCTAssertEqual(remaining.count, 1)
 
         try await store.sessions.deleteAll()
-        XCTAssertTrue(try await store.sessions.loadAll().isEmpty)
+        let empty = try await store.sessions.loadAll()
+        XCTAssertTrue(empty.isEmpty)
     }
 
     /// Sessions survive close/reopen — the durability contract Fix 2 needs.
@@ -544,7 +550,8 @@ final class SQLCipherStoreTests: XCTestCase {
         try await store.sessions.save(fingerprint: fp, snapshot: blob)
 
         let reopened = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
-        XCTAssertEqual(try await reopened.sessions.load(fingerprint: fp), blob)
+        let loaded = try await reopened.sessions.load(fingerprint: fp)
+        XCTAssertEqual(loaded, blob)
     }
 
     /// A v1 database (no ratchet_session table, user_version=1) migrates
@@ -561,8 +568,10 @@ final class SQLCipherStoreTests: XCTestCase {
         // Reopening must re-apply the v2 migration cleanly.
         let migrated = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
         store = migrated
-        XCTAssertTrue(try await migrated.sessions.loadAll().isEmpty)
+        let afterMigration = try await migrated.sessions.loadAll()
+        XCTAssertTrue(afterMigration.isEmpty)
         try await migrated.sessions.save(fingerprint: "aa", snapshot: Data([0x02]))
-        XCTAssertEqual(try await migrated.sessions.load(fingerprint: "aa"), Data([0x02]))
+        let loaded = try await migrated.sessions.load(fingerprint: "aa")
+        XCTAssertEqual(loaded, Data([0x02]))
     }
 }
