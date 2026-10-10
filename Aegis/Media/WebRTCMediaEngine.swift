@@ -93,10 +93,10 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
         defer { session.unlockForConfiguration() }
         do {
             try session.setCategory(
-                AVAudioSession.Category.playAndRecord.rawValue,
+                .playAndRecord,
                 with: [.allowBluetooth, .allowBluetoothA2DP]
             )
-            try session.setMode(AVAudioSession.Mode.voiceChat.rawValue)
+            try session.setMode(.voiceChat)
             try session.setActive(true)
         } catch {
             log.error("Audio session configuration failed: \(error.localizedDescription)")
@@ -258,7 +258,8 @@ extension WebRTCMediaEngine: CallMediaDelegate {
 
     func addIceCandidate(_ candidate: IceCandidate, for callID: UUID) async throws {
         let media = try lock.withLock { try peerLocked(for: callID) }
-        media.connection.add(RTCIceCandidate(
+        // M154's addIceCandidate is async/throws.
+        try await media.connection.add(RTCIceCandidate(
             sdp: candidate.candidate,
             sdpMLineIndex: candidate.sdpMLineIndex,
             sdpMid: candidate.sdpMid
@@ -334,8 +335,12 @@ extension WebRTCMediaEngine: CallMediaControl {
         let session = RTCAudioSession.sharedInstance()
         session.lockForConfiguration()
         defer { session.unlockForConfiguration() }
-        guard session.overrideOutputAudioPort(enabled ? .speaker : .none) else {
-            throw EngineError.sdpFailure("speaker route change was rejected by the audio session")
+        // M154's overrideOutputAudioPort returns Void; the only failure
+        // signal is a read-back of the applied route.
+        session.overrideOutputAudioPort(enabled ? .speaker : .none)
+        let expected: AVAudioSession.PortOverride = enabled ? .speaker : .none
+        guard session.outputAudioPort == expected else {
+            throw EngineError.sdpFailure("speaker route change was not applied by the audio session")
         }
     }
 
@@ -488,7 +493,8 @@ extension RTCVideoFrame {
         let pixelBuffer: CVPixelBuffer
         if let cv = buffer as? RTCCVPixelBuffer {
             pixelBuffer = cv.pixelBuffer
-        } else if let i420 = buffer.toI420(), let converted = i420.makePixelBuffer() {
+        } else if let converted = buffer.toI420().makePixelBuffer() {
+            // M154: toI420() returns a non-optional RTCI420BufferProtocol.
             pixelBuffer = converted
         } else {
             return nil
@@ -519,13 +525,12 @@ extension RTCVideoFrame {
     }
 }
 
-extension RTCI420Buffer {
+extension RTCI420BufferProtocol {
     /// Copies planar I420 data into a CoreVideo pixel buffer.
+    /// M154: dataY/U/V are non-optional UnsafePointers on the protocol.
     fileprivate func makePixelBuffer() -> CVPixelBuffer? {
         let width = Int(self.width), height = Int(self.height)
-        guard width > 0, height > 0,
-              let dataY = self.dataY, let dataU = self.dataU, let dataV = self.dataV
-        else { return nil }
+        guard width > 0, height > 0 else { return nil }
         var pixelBuffer: CVPixelBuffer?
         let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         guard CVPixelBufferCreate(
@@ -538,15 +543,15 @@ extension RTCI420Buffer {
               let dstU = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1),
               let dstV = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 2)
         else { return nil }
-        copyPlane(src: dataY, srcStride: Int(self.strideY),
+        copyPlane(src: self.dataY, srcStride: Int(self.strideY),
                   dst: dstY,
                   dstStride: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0),
                   width: width, height: height)
-        copyPlane(src: dataU, srcStride: Int(self.strideU),
+        copyPlane(src: self.dataU, srcStride: Int(self.strideU),
                   dst: dstU,
                   dstStride: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1),
                   width: width / 2, height: height / 2)
-        copyPlane(src: dataV, srcStride: Int(self.strideV),
+        copyPlane(src: self.dataV, srcStride: Int(self.strideV),
                   dst: dstV,
                   dstStride: CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 2),
                   width: width / 2, height: height / 2)
@@ -593,6 +598,15 @@ final class WindowSnapshotCapturer: RTCVideoCapturer, @unchecked Sendable {
     }
 
     private func captureOnce() {
+        // UIKit window access is @MainActor; the timer only guarantees the
+        // main queue, so hop to the actor explicitly (Swift 6).
+        Task { @MainActor [weak self] in
+            self?.captureOnceOnMain()
+        }
+    }
+
+    @MainActor
+    private func captureOnceOnMain() {
         guard let window = UIApplication.shared.firstKeyWindow,
               window.bounds.width > 1, window.bounds.height > 1 else { return }
         let format = UIGraphicsImageRendererFormat()
@@ -609,7 +623,7 @@ final class WindowSnapshotCapturer: RTCVideoCapturer, @unchecked Sendable {
             rotation: ._0,
             timeStampNs: Int64(Date().timeIntervalSince1970 * 1_000_000_000)
         )
-        delegate.capturer(self, didCaptureVideoFrame: frame)
+        delegate.capturer(self, didCapture: frame)
     }
 }
 

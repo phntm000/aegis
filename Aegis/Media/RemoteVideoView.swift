@@ -50,7 +50,7 @@ final class RemoteVideoUIView: UIView, VideoSink {
     /// arbitrary queue and requires the sink to reach the main thread
     /// itself, so this witness is `nonisolated` and hops explicitly.
     nonisolated func renderRemoteFrame(_ sampleBuffer: CMSampleBuffer, forCall callID: UUID) {
-        Task { [weak self] @MainActor in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             if self.displayLayer.status == .failed {
                 // A failed layer never recovers; rebuild it so video
