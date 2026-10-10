@@ -171,7 +171,7 @@ struct LiveCryptoService: CryptoService {
         let groupID = sidecar.cryptoGroupID
         let peer: IdentityPublic?
         if groupID == nil, let fp = sidecar.dmPeerFingerprint {
-            peer = await engine.identityPublic(forFingerprint: fp)
+            peer = await core.engine.identityPublic(forFingerprint: fp)
         } else {
             peer = nil
         }
@@ -209,7 +209,7 @@ struct LiveCryptoService: CryptoService {
         let context = await core.attachmentContext(for: wrappedKey)
         let peer: IdentityPublic?
         if let fp = context?.peerFingerprint {
-            peer = await engine.identityPublic(forFingerprint: fp)
+            peer = await core.engine.identityPublic(forFingerprint: fp)
         } else {
             peer = nil
         }
@@ -698,11 +698,11 @@ struct LiveStoreService: StoreService {
         let sidecar = await core.sidecars.load(id: conversationID)
         let peer: IdentityPublic?
         if let fp = sidecar.dmPeerFingerprint {
-            peer = await engine.identityPublic(forFingerprint: fp)
+            peer = await core.engine.identityPublic(forFingerprint: fp)
         } else {
             peer = nil
         }
-        if let fileKey = try? await engine.unwrapFileKey(
+        if let fileKey = try? await core.engine.unwrapFileKey(
             wrappedKey, groupID: sidecar.cryptoGroupID, peer: peer)
         {
             await core.noteFileKey(fileKey, wrappedKey: wrappedKey)
