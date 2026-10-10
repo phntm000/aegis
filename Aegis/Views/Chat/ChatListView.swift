@@ -9,6 +9,7 @@ struct ChatListView: View {
     @State private var navigationPath = NavigationPath()
     @State private var showingNewGroup = false
     @State private var showingNewChannel = false
+    @State private var showingJoinGroup = false
     @State private var showingAddContact = false
     @State private var conversationToDelete: Conversation?
 
@@ -56,6 +57,9 @@ struct ChatListView: View {
                         if let conversation { navigationPath.append(conversation) }
                     }
                 })
+            }
+            .sheet(isPresented: $showingJoinGroup) {
+                JoinGroupView()
             }
             .confirmationDialog(
                 "Delete this conversation?",
@@ -139,6 +143,11 @@ struct ChatListView: View {
                     showingNewChannel = true
                 } label: {
                     Label("New channel", systemImage: "megaphone.fill")
+                }
+                Button {
+                    showingJoinGroup = true
+                } label: {
+                    Label("Join with invite code", systemImage: "qrcode.viewfinder")
                 }
             } label: {
                 Image(systemName: "square.and.pencil")

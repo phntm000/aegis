@@ -310,6 +310,20 @@ final class SQLCipherConnection {
                 throw AegisStoreError.migrationFailed("v2 migration failed: \(error)")
             }
         }
+        if version < 3 {
+            try exec("BEGIN IMMEDIATE;")
+            do {
+                try execRaw(StoreSchema.v3)
+                try execRaw(
+                    "INSERT INTO schema_migrations(version, applied_at) VALUES (3, \(Date().timeIntervalSince1970));"
+                )
+                try setVersion(3)
+                try exec("COMMIT;")
+            } catch {
+                try? exec("ROLLBACK;")
+                throw AegisStoreError.migrationFailed("v3 migration failed: \(error)")
+            }
+        }
     }
 }
 

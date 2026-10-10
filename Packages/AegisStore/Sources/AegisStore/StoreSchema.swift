@@ -13,7 +13,7 @@
 
 enum StoreSchema {
     /// Current schema version. Must match SQLCipherStoreDescriptor.schemaVersion.
-    static let version = 2
+    static let version = 3
 
     static let v1 = """
         CREATE TABLE IF NOT EXISTS schema_migrations(
@@ -197,6 +197,26 @@ enum StoreSchema {
           fingerprint TEXT PRIMARY KEY,
           snapshot BLOB NOT NULL,
           updated_at REAL NOT NULL
+        );
+        """
+
+    /// v3 delta: durable group sender-key session snapshots (keyed by
+    /// groupID hex) and attachment decryption contexts (wrapped-key hash →
+    /// groupID / peer fingerprint). Without these, groups and inbound
+    /// attachments silently broke after every app restart. Applied to
+    /// existing v1/v2 databases by the migration chain; fresh databases get
+    /// v1+v2+v3. Both BLOBs are opaque to the store (versioned by
+    /// AegisCrypto / the crypto adapter).
+    static let v3 = """
+        CREATE TABLE IF NOT EXISTS group_session(
+          group_id TEXT PRIMARY KEY,
+          snapshot BLOB NOT NULL,
+          updated_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS attachment_context(
+          key_hash TEXT PRIMARY KEY,
+          group_id BLOB,
+          peer BLOB
         );
         """
 }

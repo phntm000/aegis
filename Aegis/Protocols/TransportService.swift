@@ -138,6 +138,34 @@ struct GroupEvent: Sendable, Hashable {
     let announcementOnly: Bool?
 }
 
+/// A pending request to join a group/channel, received after someone
+/// redeemed an `aegis-group:` invite code. The requester is NOT a member
+/// yet — nothing is decrypted for them and they appear nowhere until a
+/// moderator approves.
+struct JoinRequest: Sendable, Hashable, Identifiable {
+    let id: UUID
+    /// The group/channel conversation the request targets.
+    let conversationID: UUID
+    /// The requester's 32-byte identity fingerprint.
+    let requesterFingerprint: Data
+    let requesterName: String
+    let receivedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        conversationID: UUID,
+        requesterFingerprint: Data,
+        requesterName: String,
+        receivedAt: Date = Date()
+    ) {
+        self.id = id
+        self.conversationID = conversationID
+        self.requesterFingerprint = requesterFingerprint
+        self.requesterName = requesterName
+        self.receivedAt = receivedAt
+    }
+}
+
 /// Identity-change state for a 1:1 conversation: the peer's authenticated
 /// messages now come from `newFingerprint`, which differs from the contact's
 /// stored (verified) key. While set, the app shows the "safety number
@@ -186,6 +214,8 @@ protocol TransportService: Sendable {
     // MARK: Messaging
 
     func sendEnvelope(_ envelope: OutgoingEnvelope) async throws
+    /// Re-sends messages stuck in `.sending` (the offline outbox).
+    func flushOutbox() async
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws
     func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws
     /// Notify peers that the local user took a screenshot (opt-in setting).
@@ -231,6 +261,15 @@ protocol TransportService: Sendable {
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws
     func rotateSenderKey(conversationID: UUID) async throws
     func leaveConversation(_ conversationID: UUID) async throws
+    /// Redeems an `aegis-group:` invite code: establishes a 1:1 session
+    /// with the inviter from the embedded prekey bundle and sends a join
+    /// request. The requester becomes a member only after a moderator
+    /// approves (see `approveJoinRequest`).
+    func requestGroupJoin(code: String) async throws
+    /// Approves a pending join request: ensures the requester is a contact
+    /// and runs the normal invite flow (real invite + sender-key
+    /// distributions). Throws when the local user is not a moderator.
+    func approveJoinRequest(_ request: JoinRequest) async throws
 
     // MARK: Identity-change tracking
 

@@ -45,8 +45,10 @@ public struct SenderKeyState {
     public private(set) var messageIndex: UInt32
     /// Ed25519 public key authenticating this sender's messages for the epoch.
     public let signingPublicKey: Data
-    /// Private signing seed. `nil` for peer states.
-    private let signingSeed: SecureBytes?
+    /// Private signing seed. `nil` for peer states. Internal (not private)
+    /// so the same-module snapshot code can persist our own sending key;
+    /// never serialized for peers.
+    let signingSeed: SecureBytes?
 
     public init(
         senderID: Data,

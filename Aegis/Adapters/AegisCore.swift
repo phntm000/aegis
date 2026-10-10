@@ -26,6 +26,24 @@ import CryptoKit
 import Foundation
 import Security
 
+/// Errors from the transport integration hub.
+enum AegisCoreError: Error, LocalizedError {
+    /// The local user is not a moderator of this group/channel.
+    case notModerator
+    /// A malformed invite code was presented for redemption.
+    case malformedInviteCode
+    /// No group conversation matches the invite's group reference.
+    case unknownInviteGroup
+
+    var errorDescription: String? {
+        switch self {
+        case .notModerator: return "Only admins can change group membership."
+        case .malformedInviteCode: return "That invite code isn't valid."
+        case .unknownInviteGroup: return "That invite is for a group this device doesn't know."
+        }
+    }
+}
+
 // MARK: - Transport-internal control envelope
 
 /// Kinds the core consumes itself. NEVER used for user messages: those
@@ -49,6 +67,9 @@ struct GroupInnerPayload: Codable, Sendable {
 }
 
 /// Wire control message for membership/role/topic/announcement changes.
+/// Sent on the PRE-CHANGE mailbox (all current members are listening there)
+/// and encrypted under the sender's pre-change sender key, so every member
+/// — not just the changer — learns the new epoch and can adopt it.
 struct GroupControlMessage: Codable, Sendable {
     var v: Int = 1
     var groupID: Data
@@ -59,6 +80,22 @@ struct GroupControlMessage: Codable, Sendable {
     var role: String?
     var topic: String?
     var announcementOnly: Bool?
+    /// Serialized `IdentityPublic` of the added member (memberAdded only).
+    /// Lets every member resolve the new member's identity keys without a
+    /// contact relationship — required for sender-key exchange.
+    var memberIdentityKey: Data?
+    /// Full roster at the new epoch (fingerprint → entry). Makes adoption
+    /// idempotent and self-healing: a member that missed intermediate
+    /// changes reconciles to the announcer's truth instead of forking.
+    var roster: [String: GroupRosterEntry]?
+}
+
+/// One roster entry in a membership announcement.
+struct GroupRosterEntry: Codable, Sendable {
+    /// Serialized `IdentityPublic`.
+    var identityKey: Data
+    var displayName: String
+    var role: String
 }
 
 /// Invitation for a new group member (1:1 encrypted, alongside the sender-
@@ -71,6 +108,16 @@ struct GroupInviteInfo: Codable, Sendable {
     var topic: String?
     /// Fingerprint hex → display name.
     var members: [String: String]
+    /// Fingerprint hex → role string ("owner"/"admin"/"member"). Optional
+    /// for wire compatibility with older invites; defaults to "member".
+    /// The inviter is authoritative for the roster it sends — recipients
+    /// record these roles in their membership tables.
+    var roles: [String: String]?
+    /// Fingerprint hex → serialized `IdentityPublic`. Lets the joiner
+    /// resolve every member's identity keys for sender-key exchange without
+    /// needing them as contacts. Absent on older invites, in which case the
+    /// joiner falls back to resolving via its contact list.
+    var memberKeys: [String: Data]?
 }
 
 /// Chunk header for blob transfers: uploadID(16) || index u32 || count u32.
@@ -177,6 +224,10 @@ actor AegisCore {
     /// Group frames that arrived before their sender-key distribution.
     /// Retried when the distribution lands. Bounded: 50 per group.
     private var pendingGroupFrames: [String: [AegisFrame]] = [:]
+    /// Sender-key distributions that arrived before the group invite that
+    /// creates our session (the reverse race). Flushed by
+    /// handleGroupInvite right after joining. Bounded: 16 per group.
+    private var pendingDistributions: [String: [SenderKeyDistribution]] = [:]
 
     // MARK: Streams (adapters expose these)
 
@@ -293,6 +344,21 @@ actor AegisCore {
             }
         ))
         await engine.restoreSessions()
+        // Group sender-key sessions: without this every group/channel
+        // silently stopped working after an app restart.
+        let groupSessionRepo = pkgStore.groupSessions
+        await engine.configureGroupPersistence(GroupPersistence(
+            save: { groupID, envelope in
+                try? await groupSessionRepo.save(groupID: groupID, snapshot: envelope)
+            },
+            loadAll: {
+                (try? await groupSessionRepo.loadAll()) ?? [:]
+            },
+            delete: { groupID in
+                try? await groupSessionRepo.delete(groupID: groupID)
+            }
+        ))
+        await engine.restoreGroupSessions()
         try await rebuildRoutesFromStore()
         // Resolves the relay for the current mode (honestly — automatic never
         // invents an endpoint), rebuilds the hub, and starts health tracking.
@@ -340,14 +406,29 @@ actor AegisCore {
     }
 
     func bindGroup(groupID: Data, conversationID: UUID) async throws {
-        let mailbox = try await engine.groupRoutingMailbox(groupID: groupID)
-        await bind(mailbox: mailbox, route: .group(groupID: groupID, conversationID: conversationID))
+        // Bind the current epoch's mailbox AND the previous epoch's: the
+        // crypto layer accepts both (grace window for in-flight messages),
+        // so the transport must listen on both — otherwise a membership
+        // change partitions the group while members adopt the new epoch.
+        for mailbox in await engine.groupRoutingMailboxes(groupID: groupID) {
+            await bind(mailbox: mailbox, route: .group(groupID: groupID, conversationID: conversationID))
+        }
     }
 
-    /// Rebinds a group mailbox after an epoch bump (membership change).
-    func rebindGroup(groupID: Data, conversationID: UUID, oldMailbox: Data) async throws {
-        await unbind(mailbox: oldMailbox)
+    /// Rebinds group mailboxes after an epoch bump: binds the new epoch's
+    /// mailbox (keeping the previous for the grace window) and releases
+    /// mailboxes outside that window.
+    func rebindGroup(groupID: Data, conversationID: UUID, oldMailboxes: [Data]) async throws {
+        let wanted = Set(await engine.groupRoutingMailboxes(groupID: groupID).map { $0.hexString })
+        for old in oldMailboxes where !wanted.contains(old.hexString) {
+            await unbind(mailbox: old)
+        }
         try await bindGroup(groupID: groupID, conversationID: conversationID)
+    }
+
+    /// Backward-compatible single-mailbox rebind (epoch 0 groups).
+    func rebindGroup(groupID: Data, conversationID: UUID, oldMailbox: Data) async throws {
+        try await rebindGroup(groupID: groupID, conversationID: conversationID, oldMailboxes: [oldMailbox])
     }
 
     /// Binds the local identity route (pre-session first contact). Called
@@ -540,12 +621,30 @@ actor AegisCore {
         }
         if frame.flags & AegisFrame.flagTransportControl != 0 {
             // Transport-internal: the core consumes it fully.
+            // Identity-sealed distributions (magic prefix) are
+            // self-authenticating and need no 1:1 session — this covers the
+            // race where a session was established after sealing.
+            let magic = CryptoEngine.identitySealedDistributionMagic
+            if frame.payload.prefix(magic.count) == magic {
+                await handleIdentitySealedDistribution(frame.payload)
+                return
+            }
             let plaintext = try await engine.decryptDirect(frame.payload, from: peer).plaintext
             // Distributions are detected by parse (the engine sends them
             // as encryptDirect(distribution.serialized()) with no JSON
             // wrapper); everything else is a TransportControl envelope.
             if let dist = try? SenderKeyDistribution(serialized: plaintext) {
-                try await engine.ingestDistribution(dist, groupID: dist.groupID, fromSender: dist.senderID)
+                do {
+                    try await engine.ingestDistribution(dist, groupID: dist.groupID, fromSender: dist.senderID)
+                } catch CryptoEngineError.unknownGroup {
+                    // Race: the distribution arrived before the group invite
+                    // that creates our session (transports may reorder).
+                    // Stash it; handleGroupInvite flushes after joining.
+                    var pending = pendingDistributions[dist.groupID.hexString] ?? []
+                    if pending.count < 16 { pending.append(dist) }
+                    pendingDistributions[dist.groupID.hexString] = pending
+                    return
+                }
                 // Retry any group frames that were waiting on this key.
                 let key = dist.groupID.hexString
                 if let pending = pendingGroupFrames[key] {
@@ -591,6 +690,22 @@ actor AegisCore {
               let local = try? await engine.localPublicIdentity(),
               routeFingerprint == local.fingerprint
         else { return }
+        // Identity-sealed sender-key distributions (from group members we
+        // share no 1:1 session with) land on the identity route too.
+        // Detect by magic prefix BEFORE attempting prekey rendezvous. They
+        // carry the transport-control flag (like 1:1 distributions), which
+        // is explicitly allowed here when the magic matches.
+        let magic = CryptoEngine.identitySealedDistributionMagic
+        let isSealedDistribution = frame.payload.prefix(magic.count) == magic
+        guard (frame.flags & AegisFrame.flagTransportControl == 0) || isSealedDistribution,
+              frame.flags & AegisFrame.flagKnock == 0,
+              let local = try? await engine.localPublicIdentity(),
+              routeFingerprint == local.fingerprint
+        else { return }
+        if isSealedDistribution {
+            await handleIdentitySealedDistribution(frame.payload)
+            return
+        }
         let (plaintext, initiator) = try await engine.decryptPreKeyFromUnknownSender(frame.payload)
         let initiatorFP = initiator.fingerprint
         // Cache the initiator's key so the identity resolves going forward.
@@ -623,6 +738,29 @@ actor AegisCore {
                 supersedesFingerprint: supersedes
             )
         ))
+    }
+
+    /// Ingests an identity-sealed sender-key distribution: opens the
+    /// envelope (verifying the sender's identity signature against the
+    /// roster-authenticated key), ingests the distribution, and retries any
+    /// group frames that were waiting on the key.
+    private func handleIdentitySealedDistribution(_ payload: Data) async {
+        do {
+            let dist = try await engine.openIdentitySealedDistribution(payload)
+            try await engine.ingestDistribution(
+                dist, groupID: dist.groupID, fromSender: dist.senderID)
+            // Retry any group frames that were waiting on this key.
+            let key = dist.groupID.hexString
+            if let pending = pendingGroupFrames[key] {
+                pendingGroupFrames[key] = nil
+                for pendingFrame in pending { await handleFrame(pendingFrame) }
+            }
+        } catch {
+            // Authentication failed or unknown group: drop. The membership
+            // announcement carrying the roster may still be in flight; its
+            // arrival populates the roster and the sender re-distributes on
+            // the next rotation.
+        }
     }
 
     /// Extracts the sender's rotation hint from a decrypted payload, if any.
@@ -719,13 +857,36 @@ actor AegisCore {
 
     private func handleGroupFrame(frame: AegisFrame, groupID: Data, conversationID: UUID) async throws {
         let groupMessage = try GroupMessage.parse(frame.payload)
+        // A removed (or never-added) sender's messages are dropped, not
+        // stashed: no future distribution will ever make them decryptable.
+        // Our own echoed frames are dropped here too (we applied the send
+        // locally); controls from self are additionally skipped below.
+        let localFP = try? await engine.localPublicIdentity().fingerprint
+        guard await engine.isGroupMember(groupID: groupID, fingerprint: groupMessage.senderID),
+              groupMessage.senderID != localFP
+        else { return }
         do {
             let plaintext = try await engine.decryptGroup(frame.payload, groupID: groupID)
             let inner = try JSONDecoder().decode(GroupInnerPayload.self, from: plaintext)
             switch inner.kind {
             case "control":
                 let control = try JSONDecoder().decode(GroupControlMessage.self, from: inner.body)
-                try await handleGroupControl(control, conversationID: conversationID)
+                // Announcement-only enforcement (inbound): a non-moderator's
+                // client should never send here (outbound is refused), but a
+                // modified client can. Recipients drop such messages rather
+                // than displaying them in a broadcast channel.
+                let sidecar = await sidecars.load(id: conversationID)
+                if sidecar.isAnnouncementOnly == true {
+                    let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+                    let posterRole = members.first(where: { $0.userID.rawValue == groupMessage.senderID.hexString })?.role
+                    let posterCanPost: Bool
+                    switch posterRole {
+                    case .owner, .admin, .moderator: posterCanPost = true
+                    default: posterCanPost = false
+                    }
+                    guard posterCanPost else { return }
+                }
+                try await handleGroupControl(control, conversationID: conversationID, senderFingerprint: groupMessage.senderID)
             default:
                 envelopeCont.yield(IncomingEnvelope(
                     id: UUID(),
@@ -743,22 +904,56 @@ actor AegisCore {
         }
     }
 
-    private func handleGroupControl(_ control: GroupControlMessage, conversationID: UUID) async throws {
+    private func handleGroupControl(_ control: GroupControlMessage, conversationID: UUID, senderFingerprint: Data) async throws {
+        // Moderation controls (membership/role changes) are honored only
+        // from members whose LOCALLY-KNOWN role can moderate. This stops a
+        // non-admin member's modified client from silently churning the
+        // roster on everyone else's device. Honest limit: roles are
+        // advisory in the dumb-relay design — there is no server to be
+        // authoritative (see docs/THREAT_MODEL.md) — so a determined
+        // attacker who socially engineers an admin role still wins; this
+        // check only closes the trivial self-promotion hole.
+        let moderationKinds = ["memberAdded", "memberRemoved", "roleChanged", "topicChanged", "announcementModeChanged"]
+        if moderationKinds.contains(control.kind) {
+            let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+            let senderRole = members.first(where: { $0.userID.rawValue == senderFingerprint.hexString })?.role
+            let senderCanModerate: Bool
+            switch senderRole {
+            case .owner, .admin, .moderator: senderCanModerate = true
+            default: senderCanModerate = false
+            }
+            guard senderCanModerate else { return }
+        }
         // Update the package memberships so roles survive restarts.
         let cid: AegisStore.ConversationID = packageID(conversationID)
         switch control.kind {
-        case "memberAdded":
-            if let fp = control.fingerprint {
-                let membership = AegisStore.GroupMembership(
-                    conversationID: cid,
-                    userID: AegisStore.UserID(fp.hexString),
-                    role: roleFromString(control.role)
-                )
-                try await pkgStore.memberships.upsert(membership)
-            }
-        case "memberRemoved":
-            if let fp = control.fingerprint {
-                try await pkgStore.memberships.remove(conversationID: cid, userID: AegisStore.UserID(fp.hexString))
+        case "memberAdded", "memberRemoved":
+            // Epoch adoption: the announcer bumped the epoch and rotated.
+            // Adopt their roster wholesale (self-healing if we missed
+            // intermediate changes), rotate OUR sender key for the new
+            // epoch (forward secrecy — a removed member must not read our
+            // future messages), re-bind mailboxes, and publish our fresh
+            // key to every remaining member. The moderation gate above
+            // already rejected unauthorized announcers.
+            if let roster = control.roster, !roster.isEmpty,
+               let groupID = await groupIDForConversation(conversationID)
+            {
+                try await adoptAnnouncedRoster(
+                    roster, groupID: groupID, conversationID: conversationID,
+                    newEpoch: control.epoch)
+            } else if let fp = control.fingerprint {
+                // Legacy control without a roster: apply the delta only.
+                // (No epoch adoption — legacy announcers predate it.)
+                if control.kind == "memberAdded" {
+                    let membership = AegisStore.GroupMembership(
+                        conversationID: cid,
+                        userID: AegisStore.UserID(fp.hexString),
+                        role: roleFromString(control.role)
+                    )
+                    try await pkgStore.memberships.upsert(membership)
+                } else {
+                    try await pkgStore.memberships.remove(conversationID: cid, userID: AegisStore.UserID(fp.hexString))
+                }
             }
         case "roleChanged":
             if let fp = control.fingerprint {
@@ -766,6 +961,16 @@ actor AegisCore {
                     conversationID: cid, userID: AegisStore.UserID(fp.hexString),
                     role: roleFromString(control.role)
                 )
+                // If WE were re-roled, update the sidecar so the
+                // moderation UI unlocks (or locks) immediately.
+                if let local = try? await engine.localPublicIdentity(),
+                   fp == local.fingerprint,
+                   let appRole = control.role.flatMap(appRoleFromString)
+                {
+                    var sidecar = await sidecars.load(id: conversationID)
+                    sidecar.myRole = appRole
+                    await sidecars.save(id: conversationID, sidecar: sidecar)
+                }
             }
         default:
             break
@@ -786,6 +991,99 @@ actor AegisCore {
             topic: control.kind == "topicChanged" ? control.topic : nil,
             announcementOnly: control.announcementOnly
         ))
+    }
+
+    private func groupIDForConversation(_ conversationID: UUID) async -> Data? {
+        await sidecars.load(id: conversationID).cryptoGroupID
+    }
+
+    /// Adopts a roster announced in a membership control. See
+    /// `GroupSession.adoptMembershipChange` for the crypto semantics.
+    private func adoptAnnouncedRoster(
+        _ roster: [String: GroupRosterEntry],
+        groupID: Data,
+        conversationID: UUID,
+        newEpoch: UInt32
+    ) async throws {
+        let localFP = try await engine.localPublicIdentity().fingerprint
+        guard roster[localFP.hexString] != nil else {
+            // We are not in the announced roster: we were removed.
+            await handleSelfRemovedFromGroup(groupID: groupID, conversationID: conversationID)
+            return
+        }
+        // Resolve identity keys, fail-closed per entry: an entry whose key
+        // does not hash to its fingerprint is dropped, never trusted.
+        var identities: [IdentityPublic] = []
+        for (hex, entry) in roster {
+            guard let fp = Data(hexString: hex),
+                  let pub = try? IdentityPublic(serialized: entry.identityKey),
+                  pub.fingerprint == fp
+            else { continue }
+            identities.append(pub)
+        }
+        let distributions = try await engine.adoptGroupMembershipChange(
+            groupID: groupID, newEpoch: newEpoch, members: identities)
+        try await reconcileGroupMailboxes(groupID: groupID, conversationID: conversationID)
+        // Publish our fresh sender key to every remaining member (1:1
+        // session where one exists, else identity-sealed to their identity
+        // route — the new member included).
+        try await distribute(distributions)
+        // Replace the membership table with the announced roster so roles
+        // survive restarts and the UI shows the announcer's truth.
+        let cid = packageID(conversationID)
+        let current = (try? await pkgStore.memberships.members(of: cid)) ?? []
+        let rosterHexes = Set(roster.keys)
+        for member in current where !rosterHexes.contains(member.userID.rawValue) {
+            try? await pkgStore.memberships.remove(conversationID: cid, userID: member.userID)
+        }
+        for (hex, entry) in roster {
+            guard let fp = Data(hexString: hex) else { continue }
+            try await upsertMembership(conversationID: conversationID, fingerprint: fp, role: entry.role)
+            if fp == localFP, let appRole = appRoleFromString(entry.role) {
+                var sidecar = await sidecars.load(id: conversationID)
+                sidecar.myRole = appRole
+                await sidecars.save(id: conversationID, sidecar: sidecar)
+            }
+        }
+    }
+
+    /// Binds the mailboxes for the epochs the engine will now accept and
+    /// releases group mailboxes for this conversation outside that window.
+    private func reconcileGroupMailboxes(groupID: Data, conversationID: UUID) async throws {
+        let wanted = Set(await engine.groupRoutingMailboxes(groupID: groupID).map { $0.hexString })
+        for (hex, route) in routes {
+            if case .group(let gid, let cid) = route,
+               gid == groupID, cid == conversationID, !wanted.contains(hex),
+               let mailbox = MailboxID(hex: hex)
+            {
+                await unbind(mailbox: mailbox.bytes)
+            }
+        }
+        try await bindGroup(groupID: groupID, conversationID: conversationID)
+    }
+
+    /// We were removed from the group: drop the session (and its persisted
+    /// snapshot), unbind the group mailboxes, and leave the conversation
+    /// visible — the UI reads the membership table to show "removed".
+    private func handleSelfRemovedFromGroup(groupID: Data, conversationID: UUID) async {
+        await engine.leaveGroup(groupID: groupID)
+        await engine.deletePersistedGroupSession(groupID: groupID)
+        for (hex, route) in routes {
+            if case .group(let gid, let cid) = route,
+               gid == groupID, cid == conversationID,
+               let mailbox = MailboxID(hex: hex)
+            {
+                await unbind(mailbox: mailbox.bytes)
+            }
+        }
+        let cid = packageID(conversationID)
+        if let local = try? await engine.localPublicIdentity() {
+            try? await pkgStore.memberships.remove(
+                conversationID: cid, userID: AegisStore.UserID(local.fingerprint.hexString))
+        }
+        var sidecar = await sidecars.load(id: conversationID)
+        sidecar.cryptoGroupID = nil
+        await sidecars.save(id: conversationID, sidecar: sidecar)
     }
 
     // MARK: - Conversation resolution
@@ -818,6 +1116,20 @@ actor AegisCore {
         kind: EnvelopeKind,
         flags: UInt8 = 0
     ) async throws {
+        // Announcement-only (broadcast) enforcement, outbound: only
+        // moderators may post user messages to an announcement channel.
+        // (Control messages — membership, topic — always flow; they are
+        // separately gated by the moderation checks in the group ops.)
+        // The composer UI already hides the input for non-admins; this is
+        // the backstop so a UI bug can't leak a post.
+        if kind == .message {
+            let sidecar = await sidecars.load(id: conversationID)
+            if sidecar.cryptoGroupID != nil, sidecar.isAnnouncementOnly == true,
+               sidecar.myRole?.canModerate != true
+            {
+                throw AegisCoreError.notModerator
+            }
+        }
         let (mailbox, policy) = try await mailboxForConversation(conversationID, kind: kind)
         let envelopeID = try randomBytes(count: 16)
         let frame = AegisFrame(
@@ -862,9 +1174,11 @@ actor AegisCore {
     /// a transport-control envelope (no TransportControl wrapper — the
     /// receiver detects distributions by parse, see handleDirectFrame).
     func distribute(_ distributions: [OutgoingDistribution]) async throws {
-        let pairs = try await engine.distributeEncrypted(distributions)
-        for (peer, wire) in pairs {
-            let mailbox = try await engine.directRoutingMailbox(peer: peer)
+        // The engine picks the delivery path per recipient: the 1:1 session
+        // mailbox when a session (or bundle) exists, else the recipient's
+        // identity route carrying an identity-sealed distribution.
+        let triples = try await engine.distributeEncrypted(distributions)
+        for (_, wire, mailbox) in triples {
             try await sendRaw(wire, mailbox: mailbox, ttl: 0, flags: AegisFrame.flagTransportControl)
         }
     }
@@ -902,13 +1216,19 @@ actor AegisCore {
         // 1:1 group invites so members can construct their GroupSession.
         let local = try await engine.localPublicIdentity()
         var roster: [String: String] = [local.fingerprint.hexString: "You"]
-        for member in members { roster[member.fingerprint.hexString] = "" }
+        var memberKeys: [String: Data] = [local.fingerprint.hexString: local.publicView.serialized()]
+        for member in members {
+            roster[member.fingerprint.hexString] = ""
+            memberKeys[member.fingerprint.hexString] = member.serialized()
+        }
         let invite = GroupInviteInfo(
             groupID: groupID,
             epoch: 0,
             name: name,
             topic: topic,
-            members: roster
+            members: roster,
+            roles: await membershipRoles(conversationID: conversationID),
+            memberKeys: memberKeys
         )
         let inviteBody = try JSONEncoder().encode(invite)
         for peer in members {
@@ -930,6 +1250,26 @@ actor AegisCore {
         try await pkgStore.memberships.upsert(membership)
     }
 
+    /// Fingerprint hex → role string for the current membership table.
+    /// Sent inside group invites so joiners record the inviter's roster
+    /// roles instead of defaulting everyone to "member".
+    private func membershipRoles(conversationID: UUID) async -> [String: String] {
+        guard let members = try? await pkgStore.memberships.members(of: packageID(conversationID)) else {
+            return [:]
+        }
+        var out: [String: String] = [:]
+        for member in members {
+            switch member.role {
+            case .owner: out[member.userID.rawValue] = "owner"
+            case .admin: out[member.userID.rawValue] = "admin"
+            case .moderator: out[member.userID.rawValue] = "moderator"
+            case .guest: out[member.userID.rawValue] = "guest"
+            case .member: out[member.userID.rawValue] = "member"
+            }
+        }
+        return out
+    }
+
     private func handleGroupInvite(_ invite: GroupInviteInfo, from peer: IdentityPublic) async throws {
         // Ignore duplicates.
         let conversations = try await pkgStore.conversations.list(includeArchived: true, kind: nil, query: nil)
@@ -940,15 +1280,31 @@ actor AegisCore {
         }
         var members: [IdentityPublic] = []
         for (hex, _) in invite.members {
-            if let data = Data(hexString: hex),
-               let pub = await engine.identityPublic(forFingerprint: data)
+            guard let data = Data(hexString: hex) else { continue }
+            if let keyData = invite.memberKeys?[hex],
+               let pub = try? IdentityPublic(serialized: keyData),
+               pub.fingerprint == data
             {
+                // v2 invite: the inviter attests this identity key for the
+                // fingerprint (the invite itself arrived over the inviter's
+                // authenticated 1:1 session). Cache it so sender-key
+                // exchange works without a contact relationship.
+                await engine.cacheKnownIdentity(pub)
+                members.append(pub)
+            } else if let pub = await engine.identityPublic(forFingerprint: data) {
                 members.append(pub)
             }
         }
         let distributions = try await engine.joinGroup(groupID: invite.groupID, epoch: invite.epoch, members: members)
-        let conversationID = UUID()
-        var pkg = AegisStore.Conversation(kind: .group)
+        // Flush any sender-key distributions that beat the invite here.
+        let pendingKey = invite.groupID.hexString
+        if let stashed = pendingDistributions[pendingKey] {
+            pendingDistributions[pendingKey] = nil
+            for dist in stashed {
+                try? await engine.ingestDistribution(dist, groupID: dist.groupID, fromSender: dist.senderID)
+            }
+        }
+        let conversationID = UUID()        var pkg = AegisStore.Conversation(kind: .group)
         pkg.id = packageID(conversationID)
         pkg.title = invite.name
         try await pkgStore.conversations.create(pkg)
@@ -960,7 +1316,10 @@ actor AegisCore {
         try await bindGroup(groupID: invite.groupID, conversationID: conversationID)
         for (hex, _) in invite.members {
             if let data = Data(hexString: hex) {
-                try await upsertMembership(conversationID: conversationID, fingerprint: data, role: "member")
+                // The inviter is authoritative for roster roles; default to
+                // "member" for invites that predate the roles field.
+                let role = invite.roles?[hex] ?? "member"
+                try await upsertMembership(conversationID: conversationID, fingerprint: data, role: role)
             }
         }
         // Publish our sender key to the group.
@@ -969,57 +1328,202 @@ actor AegisCore {
 
     /// contactID is accepted for the app-layer signature and intentionally
     /// unused here (the crypto identity is the peer fingerprint).
+
+    /// Redeems an `aegis-group:<conversation-uuid>:<invite-payload>` code.
+    /// Establishes a 1:1 session with the inviter from the embedded prekey
+    /// bundle (X3DH — no prior contact needed) and sends a join request as
+    /// an ordinary user message. The request is X3DH-authenticated; the
+    /// inviter's app surfaces it for moderator approval. Nothing about
+    /// group membership changes on this device — the requester waits for
+    /// the real `groupInvite` + sender-key distributions after approval.
+    func requestGroupJoin(code: String) async throws {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "aegis-group:"
+        guard trimmed.hasPrefix(prefix) else { throw AegisCoreError.malformedInviteCode }
+        let rest = trimmed.dropFirst(prefix.count)
+        guard let separator = rest.firstIndex(of: ":") else { throw AegisCoreError.malformedInviteCode }
+        let groupReference = String(rest[..<separator])
+        guard UUID(uuidString: groupReference) != nil else { throw AegisCoreError.malformedInviteCode }
+        let invitePayload = String(rest[rest.index(after: separator)...])
+        guard !invitePayload.isEmpty else { throw AegisCoreError.malformedInviteCode }
+        // parseInvite caches the inviter's prekey bundle, so encryptDirect
+        // below can establish the 1:1 session from the code alone.
+        let (inviter, _) = try await engine.parseInvite(invitePayload)
+        let (_, displayName, _) = try await engine.loadIdentity()
+        var payload = WirePayload(kind: .groupJoinRequest)
+        payload.joinGroupReference = groupReference
+        payload.joinRequesterName = displayName
+        let inner = try await engine.encryptDirect(try payload.encoded(), to: inviter)
+        let mailbox = try await engine.directRoutingMailbox(peer: inviter)
+        // No session exists yet on the inviter's side: this lands on their
+        // identity route and is surfaced via the prekey rendezvous path.
+        // Generous TTL — the inviter may be offline for days.
+        try await sendRaw(inner.wire, mailbox: mailbox, ttl: 7 * 24 * 3600, flags: 0)
+    }
+
+    /// contactID is accepted for the app-layer signature and intentionally
+    /// unused here (the crypto identity is the peer fingerprint).
+    ///
+    /// Membership-change protocol (every member observes it, or the group
+    /// partitions):
+    ///  1. Announce `memberAdded` on the PRE-CHANGE mailboxes, encrypted
+    ///     under the pre-change sender key — every current member is
+    ///     listening there. The announcement carries the new epoch and the
+    ///     full identity-keyed roster so recipients adopt atomically.
+    ///  2. Bump the epoch locally, rotate our sender key, rebind mailboxes
+    ///     (keeping the previous epoch's for the crypto grace window).
+    ///  3. Send the 1:1 invite with the full identity-keyed roster so the
+    ///     joiner can resolve every member and exchange sender keys.
+    ///  4. Distribute our fresh sender key (1:1 where a session exists,
+    ///     else identity-sealed to the new member's identity route).
     func inviteMember(_ contactID: UUID, conversationID: UUID, peer: IdentityPublic) async throws {
         let sidecar = await sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
-        let oldMailbox = try await engine.groupRoutingMailbox(groupID: groupID)
+        // Only moderators may change membership. Roles are advisory (no
+        // server exists to enforce them in the dumb-relay design — see
+        // docs/THREAT_MODEL.md), but a well-behaved client refuses to send
+        // membership changes it is not entitled to make, and recipients
+        // ignore moderation controls from non-moderators (handleGroupControl).
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        let oldMailboxes = await engine.groupRoutingMailboxes(groupID: groupID)
+        let oldEpoch = await engine.groupEpoch(groupID: groupID) ?? 0
+        let newEpoch = oldEpoch + 1
+        // 1. Announce first, on the mailboxes everyone is listening on.
+        var roster = await fullRoster(conversationID: conversationID)
+        let displayName = await resolveContactName(for: peer.fingerprint) ?? ""
+        roster[peer.fingerprint.hexString] = GroupRosterEntry(
+            identityKey: peer.serialized(), displayName: displayName, role: "member")
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID, epoch: newEpoch, kind: "memberAdded",
+                fingerprint: peer.fingerprint, role: "member",
+                memberIdentityKey: peer.serialized(), roster: roster),
+            onMailboxes: oldMailboxes)
+        // 2. Bump locally.
         let distributions = try await engine.updateGroupMembership(groupID: groupID, add: [peer], remove: [])
-        try await rebindGroup(groupID: groupID, conversationID: conversationID, oldMailbox: oldMailbox)
+        try await rebindGroup(groupID: groupID, conversationID: conversationID, oldMailboxes: oldMailboxes)
         try await upsertMembership(conversationID: conversationID, fingerprint: peer.fingerprint, role: "member")
-        try await distribute(distributions)
-        // Invite + control message.
-        let currentEpoch = await engine.groupEpoch(groupID: groupID) ?? 0
+        // 3. The invite MUST travel before the sender-key distributions: the
+        // joiner cannot ingest a distribution for a group whose session
+        // does not exist yet. (A pending-distribution buffer covers
+        // transports that reorder.)
+        let groupName = (try? await pkgStore.conversations.fetch(id: packageID(conversationID)))?.title
         let invite = GroupInviteInfo(
             groupID: groupID,
-            epoch: currentEpoch,
-            name: "", topic: nil,
-            members: [peer.fingerprint.hexString: ""]
+            epoch: newEpoch,
+            name: groupName ?? "",
+            topic: sidecar.subtitle,
+            members: Dictionary(uniqueKeysWithValues: roster.map { ($0.key, $0.value.displayName) }),
+            roles: Dictionary(uniqueKeysWithValues: roster.map { ($0.key, $0.value.role) }),
+            memberKeys: Dictionary(uniqueKeysWithValues: roster.map { ($0.key, $0.value.identityKey) })
         )
         let control = TransportControl(kind: "groupInvite", body: try JSONEncoder().encode(invite))
         let inner = try await engine.encryptDirect(try JSONEncoder().encode(control), to: peer)
         let mailbox = try await engine.directRoutingMailbox(peer: peer)
         try await sendRaw(inner.wire, mailbox: mailbox, ttl: 0, flags: AegisFrame.flagTransportControl)
-        try await sendGroupControl(conversationID: conversationID, groupID: groupID,
-                                   message: GroupControlMessage(groupID: groupID,
-                                                                epoch: engine.groupEpoch(groupID: groupID) ?? 0,
-                                                                kind: "memberAdded",
-                                                                fingerprint: peer.fingerprint,
-                                                                role: "member"))
+        // 4. Publish our fresh sender key to every member.
+        try await distribute(distributions)
     }
 
+    /// Full roster for announcements: fingerprint hex → entry with identity
+    /// key, display name, and role. Built from the membership table;
+    /// identity keys resolve via the engine's known identities.
+    private func fullRoster(conversationID: UUID) async -> [String: GroupRosterEntry] {
+        var roster: [String: GroupRosterEntry] = [:]
+        let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+        for member in members {
+            let hex = member.userID.rawValue
+            guard let fp = Data(hexString: hex),
+                  let identity = await engine.identityPublic(forFingerprint: fp)
+            else { continue }
+            let role: String
+            switch member.role {
+            case .owner: role = "owner"
+            case .admin: role = "admin"
+            case .moderator: role = "moderator"
+            case .guest: role = "guest"
+            case .member: role = "member"
+            }
+            let name: String
+            if let local = try? await engine.localPublicIdentity(), fp == local.fingerprint {
+                name = "You"
+            } else {
+                name = await resolveContactName(for: fp) ?? ""
+            }
+            roster[hex] = GroupRosterEntry(identityKey: identity.serialized(), displayName: name, role: role)
+        }
+        // Ensure we are in the roster even if our membership row is missing.
+        if let local = try? await engine.localPublicIdentity(),
+           roster[local.fingerprint.hexString] == nil
+        {
+            roster[local.fingerprint.hexString] = GroupRosterEntry(
+                identityKey: local.publicView.serialized(), displayName: "You", role: "owner")
+        }
+        return roster
+    }
+
+    /// Removes a member: announces `memberRemoved` on the pre-change
+    /// mailboxes FIRST (the removed member is still listening there, so
+    /// their client learns it was removed instead of silently stalling),
+    /// then bumps the epoch, rotates, rebinds, and distributes fresh keys
+    /// to the remaining members. Forward secrecy: nobody — including the
+    /// remover — keeps using a key the removed member ever held.
     func removeMember(_ fingerprint: Data, conversationID: UUID) async throws {
         let sidecar = await sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
-        let oldMailbox = try await engine.groupRoutingMailbox(groupID: groupID)
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        let oldMailboxes = await engine.groupRoutingMailboxes(groupID: groupID)
+        let oldEpoch = await engine.groupEpoch(groupID: groupID) ?? 0
+        let newEpoch = oldEpoch + 1
+        // 1. Announce first: the roster WITHOUT the removed member.
+        var roster = await fullRoster(conversationID: conversationID)
+        roster.removeValue(forKey: fingerprint.hexString)
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID, epoch: newEpoch, kind: "memberRemoved",
+                fingerprint: fingerprint, roster: roster),
+            onMailboxes: oldMailboxes)
+        // 2. Bump locally.
         let distributions = try await engine.updateGroupMembership(groupID: groupID, add: [], remove: [fingerprint])
-        try await rebindGroup(groupID: groupID, conversationID: conversationID, oldMailbox: oldMailbox)
+        try await rebindGroup(groupID: groupID, conversationID: conversationID, oldMailboxes: oldMailboxes)
         try await pkgStore.memberships.remove(
             conversationID: packageID(conversationID),
             userID: AegisStore.UserID(fingerprint.hexString)
         )
+        // 3. Fresh keys to the remaining members only.
         try await distribute(distributions)
-        try await sendGroupControl(conversationID: conversationID, groupID: groupID,
-                                   message: GroupControlMessage(groupID: groupID,
-                                                                epoch: engine.groupEpoch(groupID: groupID) ?? 0,
-                                                                kind: "memberRemoved",
-                                                                fingerprint: fingerprint))
     }
 
-    func sendGroupControl(conversationID: UUID, groupID: Data, message: GroupControlMessage) async throws {
+    /// Sends a group control message. When `onMailboxes` is given, the
+    /// ciphertext goes to exactly those mailboxes instead of the
+    /// conversation's current one — used for membership announcements,
+    /// which must reach members on the PRE-CHANGE mailboxes while they
+    /// are still listening there.
+    func sendGroupControl(
+        conversationID: UUID,
+        groupID: Data,
+        message: GroupControlMessage,
+        onMailboxes: [Data]? = nil
+    ) async throws {
         let inner = GroupInnerPayload(kind: "control", body: try JSONEncoder().encode(message))
         let (wire, rotation) = try await engine.encryptGroup(try JSONEncoder().encode(inner), groupID: groupID)
         if !rotation.isEmpty { try await distribute(rotation) }
-        try await sendCiphertext(wire, conversationID: conversationID, kind: .groupControl)
+        if let mailboxes = onMailboxes {
+            for mailbox in mailboxes {
+                let frame = AegisFrame(
+                    mailbox: MailboxID(mailbox),
+                    envelopeID: try randomBytes(count: 16),
+                    ttl: ttlForKind(.groupControl),
+                    flags: 0,
+                    payload: wire
+                )
+                try await hub.send(frame, policy: .allConnected)
+            }
+        } else {
+            try await sendCiphertext(wire, conversationID: conversationID, kind: .groupControl)
+        }
     }
 
     private func sendRaw(_ payload: Data, mailbox: Data, ttl: UInt32, flags: UInt8) async throws {
@@ -1209,14 +1713,70 @@ actor AegisCore {
     func noteAttachmentContext(wrappedKey: Data, groupID: Data?, peerFingerprint: Data?) {
         let hash = Data(SHA256.hash(data: wrappedKey)).map { String(format: "%02x", $0) }.joined()
         attachmentContexts[hash] = AttachmentContext(groupID: groupID, peerFingerprint: peerFingerprint)
+        // Persist: the in-memory dict does not survive an app restart, and
+        // without the context inbound attachments can never be decrypted.
+        // Fire-and-forget — persistence failures never break the send path.
+        let repo = pkgStore.attachmentContexts
+        Task.detached {
+            try? await repo.save(keyHash: hash, groupID: groupID, peer: peerFingerprint)
+        }
     }
 
-    func attachmentContext(for wrappedKey: Data) -> AttachmentContext? {
+    func attachmentContext(for wrappedKey: Data) async -> AttachmentContext? {
         let hash = Data(SHA256.hash(data: wrappedKey)).map { String(format: "%02x", $0) }.joined()
-        return attachmentContexts[hash]
+        if let context = attachmentContexts[hash] { return context }
+        // Restart path: the in-memory dict is empty; fall back to the
+        // persisted context, then warm the cache.
+        if let stored = try? await pkgStore.attachmentContexts.load(keyHash: hash) {
+            let context = AttachmentContext(groupID: stored.groupID, peerFingerprint: stored.peer)
+            attachmentContexts[hash] = context
+            return context
+        }
+        return nil
+    }
+
+    // MARK: - Attachment file keys
+
+    /// The wrapped file key is only unwrappable while the sender's sender
+    /// key is current (epoch window) — after rotations or a restart the
+    /// unwrap fails even though the ciphertext blob is still on the relay.
+    /// So we cache the RAW file key at the moment we know it (send time,
+    /// or inbound receipt while the epoch is current) in the Keychain,
+    /// keyed by the wrapped-key hash. The Keychain is device-encrypted;
+    /// storing file keys there is no weaker than the SQLCipher database
+    /// that already holds decrypted message bodies.
+    func noteFileKey(_ fileKey: Data, wrappedKey: Data) {
+        let hash = Data(SHA256.hash(data: wrappedKey)).map { String(format: "%02x", $0) }.joined()
+        try? KeychainHelper.save(fileKey, service: "app.aegis.filekeys", account: hash)
+    }
+
+    func fileKey(forWrappedKey wrappedKey: Data) -> Data? {
+        let hash = Data(SHA256.hash(data: wrappedKey)).map { String(format: "%02x", $0) }.joined()
+        return try? KeychainHelper.load(service: "app.aegis.filekeys", account: hash)
     }
 
     // MARK: - Blob transfer (chunked sealed frames)
+
+    /// uploadID hex → cached ciphertext blob, kept for re-transmission when
+    /// a downloader's chunks never arrive (LAN transports don't retain
+    /// frames; the relay inbox does, but only for 7 days). Bounded: 64
+    /// blobs, oldest evicted first (files deleted with the entry).
+    private var sentBlobCache: [String: URL] = [:]
+    private static let maxSentBlobCache = 64
+
+    private func rememberSentBlob(uploadID: Data, fileURL: URL) {
+        let key = uploadID.hexString
+        let cached = AegisPaths.sentBlobDirectory.appendingPathComponent(key, isDirectory: false)
+        try? FileManager.default.removeItem(at: cached)
+        guard (try? FileManager.default.copyItem(at: fileURL, to: cached)) != nil else { return }
+        if let old = sentBlobCache[key] { try? FileManager.default.removeItem(at: old) }
+        sentBlobCache[key] = cached
+        while sentBlobCache.count > Self.maxSentBlobCache, let oldest = sentBlobCache.keys.sorted().first {
+            if let url = sentBlobCache.removeValue(forKey: oldest) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
 
     /// Locator format: `<routing-mailbox hex>:<attachment UUID hex>`.
     /// The downloader parses it back to (mailbox, uploadID).
@@ -1232,16 +1792,36 @@ actor AegisCore {
     /// transport never sees plaintext.
     func uploadBlob(from fileURL: URL, id: UUID, conversationID: UUID) -> AsyncStream<Double> {
         let (stream, continuation) = AsyncStream<Double>.makeStream()
+        // Cache for re-transmission before detaching (actor-isolated).
+        let uuidHex = id.uuidString.replacingOccurrences(of: "-", with: "")
+        let uploadID = Data(hexString: uuidHex) ?? Data(count: 16)
+        rememberSentBlob(uploadID: uploadID, fileURL: fileURL)
         // Detached: chunked uploads must not serialize on the core actor.
         Task.detached { [hub] in
             do {
                 let data = try Data(contentsOf: fileURL)
+                let (mailbox, _) = try await self.mailboxForConversation(conversationID, kind: .message)
+                for await progress in Self.sendBlobChunks(data: data, uploadID: uploadID, mailbox: mailbox, hub: hub) {
+                    continuation.yield(progress)
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish()
+            }
+        }
+        return stream
+    }
+
+    /// Sends chunk frames for one blob. Static so both the initial upload
+    /// and re-transmissions share the exact wire format.
+    private static func sendBlobChunks(
+        data: Data, uploadID: Data, mailbox: Data, hub: TransportHub
+    ) -> AsyncStream<Double> {
+        let (stream, continuation) = AsyncStream<Double>.makeStream()
+        Task.detached {
+            do {
                 let chunkSize = AegisFrame.maxPayloadSize - BlobChunkHeader.size
                 let count = max(1, (data.count + chunkSize - 1) / chunkSize)
-                let (mailbox, _) = try await self.mailboxForConversation(conversationID, kind: .message)
-                var uploadID = Data(count: 16)
-                let uuidBytes = id.uuidString.replacingOccurrences(of: "-", with: "")
-                if let parsed = Data(hexString: uuidBytes) { uploadID = parsed }
                 for index in 0..<count {
                     let start = index * chunkSize
                     let end = min(start + chunkSize, data.count)
@@ -1267,6 +1847,46 @@ actor AegisCore {
             }
         }
         return stream
+    }
+
+    /// Re-transmits a cached blob (same uploadID, so the downloader's
+    /// in-flight reassembly merges the chunks). Returns false when the
+    /// blob is no longer cached.
+    private func retransmitBlob(uploadID: Data, mailbox: Data) async -> Bool {
+        guard let url = sentBlobCache[uploadID.hexString],
+              let data = try? Data(contentsOf: url)
+        else { return false }
+        for await _ in Self.sendBlobChunks(data: data, uploadID: uploadID, mailbox: mailbox, hub: hub) {}
+        return true
+    }
+
+    /// Asks whoever uploaded a blob to re-transmit its chunks. Used by
+    /// downloadBlob before listening (covers LAN transports with no frame
+    /// retention) and after a stall. Anyone holding the blob may answer;
+    /// chunk reassembly deduplicates by index.
+    private func requestBlobRedelivery(uploadID: Data, mailbox: Data) async {
+        guard let route = routes[MailboxID(mailbox).hex] else { return }
+        switch route {
+        case .group(let groupID, let conversationID):
+            let message = GroupControlMessage(
+                groupID: groupID,
+                epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+                kind: "blobRequest",
+                blobUploadID: uploadID.hexString
+            )
+            // Best-effort: the uploader may be offline; the relay inbox or
+            // a later retry covers it.
+            try? await sendGroupControl(conversationID: conversationID, groupID: groupID, message: message)
+        case .direct(let fingerprint):
+            guard let peer = await engine.identityPublic(forFingerprint: fingerprint) else { return }
+            let body = BlobRequestBody(uploadID: uploadID.hexString)
+            guard let bodyData = try? JSONEncoder().encode(body),
+                  let control = try? JSONEncoder().encode(TransportControl(kind: "blobRequest", body: bodyData)),
+                  let inner = try? await engine.encryptDirect(control, to: peer),
+                  let mailbox = try? await engine.directRoutingMailbox(peer: peer)
+            else { return }
+            try? await sendRaw(inner.wire, mailbox: mailbox, ttl: 7 * 24 * 3600, flags: AegisFrame.flagTransportControl)
+        }
     }
 
     /// Downloads a blob previously uploaded with `uploadBlob`. Detached so a

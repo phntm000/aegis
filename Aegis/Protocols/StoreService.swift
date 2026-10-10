@@ -35,6 +35,10 @@ protocol StoreService: Sendable {
     func purgeExpiredMessages() async throws -> Int
     /// Full-text search across conversations (for the in-app search UI).
     func searchMessages(query: String, limit: Int) async throws -> [Message]
+    /// Outgoing messages stuck in `.sending` (deliveryState `.queued`):
+    /// the offline outbox. The app flushes these on launch and when
+    /// connectivity returns.
+    func pendingOutbox() async throws -> [Message]
 
     // MARK: Contacts
 
@@ -47,6 +51,13 @@ protocol StoreService: Sendable {
     func fetchCallHistory(limit: Int) async throws -> [CallRecord]
     func saveCallRecord(_ record: CallRecord) async throws
     func clearCallHistory() async throws
+
+    // MARK: Group memberships
+
+    /// The membership table for a group/channel: fingerprint hex → role.
+    /// This is the role truth the roster UI renders (not the conversation
+    /// snapshot, which only carries our own role).
+    func fetchMembershipRoles(conversationID: UUID) async throws -> [String: MemberRole]
 
     // MARK: Storage management
 

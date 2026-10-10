@@ -26,7 +26,7 @@ import Foundation
 /// outside the package cannot write `AegisCrypto.GroupMember`.
 public typealias CryptoGroupMember = GroupMember
 
-public struct GroupMember: Equatable {
+public struct GroupMember: Equatable, Codable {
     /// 32-byte identity fingerprint.
     public let fingerprint: Data
     public let displayName: String
@@ -164,6 +164,38 @@ public final class GroupSession {
 
     private func bumpEpoch() throws -> [OutgoingDistribution] {
         epoch &+= 1
+        try rotateOurSenderKey()
+        return try distributionsForAllMembers()
+    }
+
+    /// Adopts a membership change announced by another member.
+    ///
+    /// Unlike `addMember`/`removeMember` (which bump the epoch because WE
+    /// initiated the change), this adopts a change someone else initiated:
+    /// the epoch is set to `newEpoch`, the member set is replaced wholesale
+    /// by `members` (the announcer's full roster, so a client that missed
+    /// intermediate changes reconciles instead of forking), sender states
+    /// for departed members are dropped, OUR sender key is rotated for the
+    /// new epoch, and distributions for every other member are returned.
+    ///
+    /// Rotating our key on every adopted change (not just removals) is the
+    /// forward-secrecy rule: a removed member must not read our future
+    /// messages, and a new member must receive a fresh key — never a key
+    /// that existed before they joined.
+    ///
+    /// Stale or duplicate announcements (`newEpoch <= epoch`) are ignored.
+    @discardableResult
+    public func adoptMembershipChange(newEpoch: UInt32, members: [GroupMember]) throws -> [OutgoingDistribution] {
+        guard newEpoch > epoch else { return [] }
+        var updated = Dictionary(uniqueKeysWithValues: members.map { ($0.fingerprint, $0) })
+        if updated[ourFingerprint] == nil {
+            updated[ourFingerprint] = GroupMember(fingerprint: ourFingerprint, displayName: "You")
+        }
+        self.members = updated
+        // A removed member's late messages must not decrypt, even within
+        // the old-epoch grace window.
+        peerSenderStates = peerSenderStates.filter { updated[$0.key.senderID] != nil }
+        epoch = newEpoch
         try rotateOurSenderKey()
         return try distributionsForAllMembers()
     }
@@ -376,5 +408,133 @@ public final class GroupSession {
             }
             peerSenderStates.removeValue(forKey: oldest)
         }
+    }
+
+    // MARK: - Snapshots (durable persistence)
+
+    /// Captures the full session state for at-rest persistence. See
+    /// GroupSnapshot.swift for the security notes.
+    public func snapshot() -> GroupSessionSnapshot {
+        let members = members.values.map {
+            GroupMemberSnapshot(fingerprint: $0.fingerprint, displayName: $0.displayName)
+        }
+        var peers: [PeerSenderKeySnapshot] = []
+        peers.reserveCapacity(peerSenderStates.count)
+        for (id, state) in peerSenderStates {
+            var skipped: [String: Data] = [:]
+            skipped.reserveCapacity(state.skipped.count)
+            for (index, key) in state.skipped {
+                skipped[String(index)] = key.withUnsafeBytes { Data($0) }
+            }
+            peers.append(PeerSenderKeySnapshot(
+                senderID: id.senderID,
+                epoch: id.epoch,
+                chainKey: state.senderKey.chainKey.toData(),
+                messageIndex: state.senderKey.messageIndex,
+                signingPublicKey: state.senderKey.signingPublicKey,
+                skippedKeys: skipped,
+                lastUsed: state.lastUsed
+            ))
+        }
+        let ourKey = ourSenderKey
+        return GroupSessionSnapshot(
+            groupID: groupID,
+            epoch: epoch,
+            ourFingerprint: ourFingerprint,
+            members: members,
+            ourChainKey: ourKey?.chainKey.toData() ?? Data(),
+            ourMessageIndex: ourKey?.messageIndex ?? 0,
+            ourSigningPublicKey: ourKey?.signingPublicKey ?? Data(),
+            ourSigningSeed: ourKey?.signingSeed?.toData(),
+            ourKeyCreatedAt: ourSenderKeyCreatedAt,
+            messagesSentOnCurrentKey: messagesSentOnCurrentKey,
+            peers: peers
+        )
+    }
+
+    /// Rebuilds a session from a snapshot. The snapshot must have passed
+    /// `validated()` (use `GroupSessionSnapshot.parse(_:)`).
+    public convenience init(
+        restoring snapshot: GroupSessionSnapshot,
+        provider: any CryptoProvider = CryptoKitProvider.shared
+    ) throws {
+        guard snapshot.version <= GroupSessionSnapshot.currentVersion else {
+            throw AegisCryptoError.unsupportedVersion(UInt8(min(snapshot.version, 255)))
+        }
+        guard snapshot.ourChainKey.count == 32,
+              snapshot.ourSigningPublicKey.count == 32,
+              let seedData = snapshot.ourSigningSeed, !seedData.isEmpty
+        else {
+            // Without our signing seed we could receive but never send;
+            // a half-restored session is worse than none — the caller
+            // treats this as "group unknown" and re-joins.
+            throw AegisCryptoError.invalidKeyData
+        }
+        self.init(
+            groupID: snapshot.groupID,
+            epoch: snapshot.epoch,
+            ourFingerprint: snapshot.ourFingerprint,
+            members: Dictionary(
+                uniqueKeysWithValues: snapshot.members.map {
+                    ($0.fingerprint, GroupMember(fingerprint: $0.fingerprint, displayName: $0.displayName))
+                }
+            ),
+            ourSenderKey: SenderKeyState(
+                senderID: snapshot.ourFingerprint,
+                epoch: snapshot.epoch,
+                chainKey: SecureBytes(snapshot.ourChainKey),
+                messageIndex: snapshot.ourMessageIndex,
+                signingPublicKey: snapshot.ourSigningPublicKey,
+                signingSeed: SecureBytes(seedData)
+            ),
+            ourSenderKeyCreatedAt: snapshot.ourKeyCreatedAt,
+            messagesSentOnCurrentKey: snapshot.messagesSentOnCurrentKey,
+            provider: provider
+        )
+        for peer in snapshot.peers {
+            var skipped: [UInt32: SymmetricKey] = [:]
+            skipped.reserveCapacity(peer.skippedKeys.count)
+            for (indexString, keyData) in peer.skippedKeys {
+                guard let index = UInt32(indexString), keyData.count == 32 else {
+                    throw AegisCryptoError.invalidKeyData
+                }
+                skipped[index] = SymmetricKey(data: keyData)
+            }
+            let id = PeerKeyID(senderID: peer.senderID, epoch: peer.epoch)
+            peerSenderStates[id] = PeerSenderState(
+                senderKey: SenderKeyState(
+                    senderID: peer.senderID,
+                    epoch: peer.epoch,
+                    chainKey: SecureBytes(peer.chainKey),
+                    messageIndex: peer.messageIndex,
+                    signingPublicKey: peer.signingPublicKey
+                ),
+                skipped: skipped,
+                lastUsed: peer.lastUsed
+            )
+        }
+    }
+
+    /// Private designated initializer used by the restoring path so the
+    /// member table and our sender key are installed exactly as
+    /// snapshotted (the public initializers always generate fresh keys).
+    private init(
+        groupID: Data,
+        epoch: UInt32,
+        ourFingerprint: Data,
+        members: [Data: GroupMember],
+        ourSenderKey: SenderKeyState,
+        ourSenderKeyCreatedAt: Date?,
+        messagesSentOnCurrentKey: UInt32,
+        provider: any CryptoProvider
+    ) {
+        self.groupID = groupID
+        self.epoch = epoch
+        self.ourFingerprint = ourFingerprint
+        self.provider = provider
+        self.members = members
+        self.ourSenderKey = ourSenderKey
+        self.ourSenderKeyCreatedAt = ourSenderKeyCreatedAt
+        self.messagesSentOnCurrentKey = messagesSentOnCurrentKey
     }
 }

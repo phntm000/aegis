@@ -193,6 +193,32 @@ public protocol SessionRepository: Sendable {
     func deleteAll() async throws
 }
 
+/// Durable `GroupSession` snapshots, keyed by groupID hex. Same security
+/// posture as `SessionRepository`: current chain keys only, SQLCipher
+/// at-rest encryption, excluded from encrypted backups (a restored backup
+/// re-joins groups with fresh sender keys).
+public protocol GroupSessionRepository: Sendable {
+    /// Upserts the snapshot for a group (groupID hex).
+    func save(groupID: String, snapshot: Data) async throws
+    /// Returns all stored group sessions keyed by groupID hex.
+    func loadAll() async throws -> [String: Data]
+    func delete(groupID: String) async throws
+    func deleteAll() async throws
+}
+
+/// Attachment decryption contexts: wrapped-key SHA-256 hex → the
+/// conversation context (`unwrapFileKey` needs to know whether the key was
+/// wrapped for a group or a 1:1 session). Persisted so inbound attachments
+/// remain decryptable after an app restart.
+public protocol AttachmentContextRepository: Sendable {
+    /// Upserts the context. `groupID` is set for group attachments,
+    /// `peer` (fingerprint) for 1:1 attachments; exactly one is non-nil.
+    func save(keyHash: String, groupID: Data?, peer: Data?) async throws
+    /// Returns the stored context, or nil when unknown.
+    func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)?
+    func deleteAll() async throws
+}
+
 // MARK: - Composite store
 
 /// The single entry point the app holds. Backed in production by the
@@ -205,6 +231,8 @@ public protocol AegisDatabase: Sendable {
     var attachments: any AttachmentRepository { get }
     var calls: any CallRecordRepository { get }
     var sessions: any SessionRepository { get }
+    var groupSessions: any GroupSessionRepository { get }
+    var attachmentContexts: any AttachmentContextRepository { get }
 
     /// Runs `work` inside a single transaction. Nested transactions are
     /// flattened (savepoints in SQLCipher; re-entrant lock in memory).

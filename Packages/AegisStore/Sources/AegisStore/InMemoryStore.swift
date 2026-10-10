@@ -13,7 +13,7 @@
 
 import Foundation
 
-public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageRepository, ContactRepository, GroupMembershipRepository, AttachmentRepository, CallRecordRepository, SessionRepository {
+public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageRepository, ContactRepository, GroupMembershipRepository, AttachmentRepository, CallRecordRepository, SessionRepository, GroupSessionRepository, AttachmentContextRepository {
     // MARK: - Storage
 
     private var conversationsByID: [ConversationID: Conversation] = [:]
@@ -31,6 +31,8 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
     private var callsByConversation: [ConversationID: [CallID]] = [:]
     /// peer fingerprint hex -> opaque session snapshot
     private var sessionsByFingerprint: [String: Data] = [:]
+    private var groupSessionsByID: [String: Data] = [:]
+    private var attachmentContextsByHash: [String: (groupID: Data?, peer: Data?)] = [:]
 
     public init() {}
 
@@ -43,6 +45,8 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
     public nonisolated var attachments: any AttachmentRepository { self }
     public nonisolated var calls: any CallRecordRepository { self }
     public nonisolated var sessions: any SessionRepository { self }
+    public nonisolated var groupSessions: any GroupSessionRepository { self }
+    public nonisolated var attachmentContexts: any AttachmentContextRepository { self }
 
     public func transaction<T: Sendable>(
         _ work: @Sendable () async throws -> T
@@ -594,5 +598,41 @@ extension InMemoryAegisStore {
 
     public func deleteAll() async throws {
         sessionsByFingerprint.removeAll()
+    }
+}
+
+// MARK: - GroupSessionRepository
+
+extension InMemoryAegisStore {
+    public func save(groupID: String, snapshot: Data) async throws {
+        groupSessionsByID[groupID] = snapshot
+    }
+
+    public func loadAll() async throws -> [String: Data] {
+        groupSessionsByID
+    }
+
+    public func delete(groupID: String) async throws {
+        groupSessionsByID.removeValue(forKey: groupID)
+    }
+
+    public func deleteAll() async throws {
+        groupSessionsByID.removeAll()
+    }
+}
+
+// MARK: - AttachmentContextRepository
+
+extension InMemoryAegisStore {
+    public func save(keyHash: String, groupID: Data?, peer: Data?) async throws {
+        attachmentContextsByHash[keyHash] = (groupID, peer)
+    }
+
+    public func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
+        attachmentContextsByHash[keyHash]
+    }
+
+    public func deleteAll() async throws {
+        attachmentContextsByHash.removeAll()
     }
 }

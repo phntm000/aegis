@@ -31,6 +31,10 @@ final class AppState: ObservableObject {
     @Published var incomingCall: IncomingCall?
     @Published var activeCall: ActiveCall?
     @Published var bootstrapError: String?
+    /// Pending group/channel join requests awaiting moderator approval.
+    /// Kept in memory (a request is re-sendable by the requester pasting
+    /// the code again); the invite code itself is the durable artifact.
+    @Published private(set) var joinRequests: [JoinRequest] = []
 
     /// The conversation currently on screen (for screenshot notices, read receipts).
     var visibleConversationID: UUID?
@@ -102,6 +106,10 @@ final class AppState: ObservableObject {
             // Sweep expired disappearing messages on every launch.
             _ = try? await store.purgeExpiredMessages()
             phase = appLock.isEnabled ? .locked : .main
+            if phase == .main {
+                // Flush the offline outbox now that we're live.
+                Task { await transport.flushOutbox() }
+            }
         } catch {
             bootstrapError = error.localizedDescription
             phase = .onboarding
@@ -113,6 +121,7 @@ final class AppState: ObservableObject {
         self.identity = identity
         self.bootstrapError = nil
         self.phase = .main
+        Task { await transport.flushOutbox() }
     }
 
     /// Full wipe: crypto identity + local store, then back to onboarding.
@@ -130,7 +139,13 @@ final class AppState: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             for await state in self.transport.connectionEvents {
+                let wasSendable = self.connectionState.canSend
                 self.connectionState = state
+                // Connectivity regained after an outage: flush the offline
+                // outbox so queued messages go out without manual retries.
+                if !wasSendable, state.canSend, self.phase == .main {
+                    Task { await self.transport.flushOutbox() }
+                }
             }
         }
         Task { @MainActor [weak self] in
@@ -226,6 +241,8 @@ final class AppState: ObservableObject {
                 await handleIncomingTyping(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .screenshotNotice:
                 await handleIncomingScreenshotNotice(envelope: envelope, senderIdentity: fullSenderIdentity)
+            case .groupJoinRequest:
+                await handleIncomingJoinRequest(payload, envelope: envelope)
             }
         } catch {
             // Corrupt or undecryptable envelope: drop it loudly in debug, silently
@@ -372,6 +389,7 @@ final class AppState: ObservableObject {
         let expiresAt = payload.expiresIn.map { Date().addingTimeInterval($0) }
 
         let message = Message(
+            id: payload.messageID,
             conversationID: conversation.id,
             senderID: contact.id,
             isFromMe: false,
@@ -489,6 +507,57 @@ final class AppState: ObservableObject {
         guard let conversationID = visibleConversationID else { return }
         try? await transport.sendScreenshotNotice(conversationID: conversationID)
         await insertNotice(conversationID: conversationID, text: "You took a screenshot")
+    }
+
+    // MARK: - Group join requests
+
+    /// Posted when a join request arrives or the pending list changes.
+    /// `object` is the `JoinRequest` for arrivals, nil for list changes.
+    private func handleIncomingJoinRequest(_ payload: WirePayload, envelope: IncomingEnvelope) async {
+        // The request references the inviter's conversation UUID; it must
+        // be one of OUR group/channel conversations, otherwise someone is
+        // probing with a forged reference.
+        guard let ref = payload.joinGroupReference,
+              let conversationID = UUID(uuidString: ref),
+              let conversation = try? await store.fetchConversation(id: conversationID),
+              conversation.kind == .group || conversation.kind == .channel
+        else { return }
+        let request = JoinRequest(
+            conversationID: conversationID,
+            requesterFingerprint: envelope.senderKey,
+            requesterName: payload.joinRequesterName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty ?? "Unknown"
+        )
+        // De-duplicate: one pending request per requester per group.
+        joinRequests.removeAll {
+            $0.conversationID == conversationID && $0.requesterFingerprint == envelope.senderKey
+        }
+        joinRequests.append(request)
+        joinRequests.sort { $0.receivedAt < $1.receivedAt }
+        NotificationCenter.default.post(name: .aegisJoinRequest, object: request)
+        Haptics.notification(.success)
+    }
+
+    /// Approves a join request: the requester becomes a contact and is
+    /// invited (real invite + sender-key distributions). Only moderators
+    /// can approve — the transport throws otherwise.
+    func approveJoinRequest(_ request: JoinRequest) async throws {
+        try await transport.approveJoinRequest(request)
+        joinRequests.removeAll { $0.id == request.id }
+        NotificationCenter.default.post(name: .aegisJoinRequest, object: nil)
+    }
+
+    /// Declines a join request. Local-only: the requester is simply never
+    /// invited (no decline notice is sent — a declined request is
+    /// indistinguishable from an unanswered one, which is the honest
+    /// privacy posture for an invite-gated group).
+    func declineJoinRequest(_ request: JoinRequest) {
+        joinRequests.removeAll { $0.id == request.id }
+        NotificationCenter.default.post(name: .aegisJoinRequest, object: nil)
+    }
+
+    func joinRequests(for conversationID: UUID) -> [JoinRequest] {
+        joinRequests.filter { $0.conversationID == conversationID }
     }
 
     // MARK: - Helpers

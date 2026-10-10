@@ -17,7 +17,8 @@ import CSQLCipher
 
 public actor SQLCipherAegisStore: AegisDatabase,
     ConversationRepository, MessageRepository, ContactRepository,
-    GroupMembershipRepository, AttachmentRepository, CallRecordRepository
+    GroupMembershipRepository, AttachmentRepository, CallRecordRepository,
+    SessionRepository, GroupSessionRepository, AttachmentContextRepository
 {
     let conn: SQLCipherConnection
     private var transactionDepth = 0
@@ -110,6 +111,8 @@ public actor SQLCipherAegisStore: AegisDatabase,
     public nonisolated var attachments: any AttachmentRepository { self }
     public nonisolated var calls: any CallRecordRepository { self }
     public nonisolated var sessions: any SessionRepository { self }
+    public nonisolated var groupSessions: any GroupSessionRepository { self }
+    public nonisolated var attachmentContexts: any AttachmentContextRepository { self }
 
     public func transaction<T: Sendable>(
         _ work: @Sendable () async throws -> T

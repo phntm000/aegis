@@ -555,3 +555,73 @@ extension SQLCipherAegisStore: SessionRepository {
         try conn.exec("DELETE FROM ratchet_session;")
     }
 }
+
+// MARK: - GroupSessionRepository
+
+extension SQLCipherAegisStore: GroupSessionRepository {
+    public func save(groupID: String, snapshot: Data) async throws {
+        try conn.exec(
+            """
+            INSERT INTO group_session(group_id, snapshot, updated_at)
+            VALUES (?,?,?)
+            ON CONFLICT(group_id) DO UPDATE SET
+              snapshot = excluded.snapshot,
+              updated_at = excluded.updated_at;
+            """,
+            [.text(groupID), .blob(snapshot), .real(Date().timeIntervalSince1970)]
+        )
+    }
+
+    public func loadAll() async throws -> [String: Data] {
+        var out: [String: Data] = [:]
+        for row in try conn.query("SELECT group_id, snapshot FROM group_session;") {
+            guard case .text(let gid) = row["group_id"],
+                  case .blob(let data) = row["snapshot"]
+            else { continue }
+            out[gid] = data
+        }
+        return out
+    }
+
+    public func delete(groupID: String) async throws {
+        try conn.exec("DELETE FROM group_session WHERE group_id = ?;", [.text(groupID)])
+    }
+
+    public func deleteAll() async throws {
+        try conn.exec("DELETE FROM group_session;")
+    }
+}
+
+// MARK: - AttachmentContextRepository
+
+extension SQLCipherAegisStore: AttachmentContextRepository {
+    public func save(keyHash: String, groupID: Data?, peer: Data?) async throws {
+        try conn.exec(
+            """
+            INSERT INTO attachment_context(key_hash, group_id, peer)
+            VALUES (?,?,?)
+            ON CONFLICT(key_hash) DO UPDATE SET
+              group_id = excluded.group_id,
+              peer = excluded.peer;
+            """,
+            [.text(keyHash), groupID.map(SQLValue.blob) ?? .null, peer.map(SQLValue.blob) ?? .null]
+        )
+    }
+
+    public func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
+        let rows = try conn.query(
+            "SELECT group_id, peer FROM attachment_context WHERE key_hash = ?;",
+            [.text(keyHash)]
+        )
+        guard let row = rows.first else { return nil }
+        let groupID: Data?
+        if case .blob(let data) = row["group_id"] { groupID = data } else { groupID = nil }
+        let peer: Data?
+        if case .blob(let data) = row["peer"] { peer = data } else { peer = nil }
+        return (groupID, peer)
+    }
+
+    public func deleteAll() async throws {
+        try conn.exec("DELETE FROM attachment_context;")
+    }
+}

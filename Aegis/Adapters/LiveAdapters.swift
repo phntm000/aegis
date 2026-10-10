@@ -62,6 +62,7 @@ struct LiveCryptoService: CryptoService {
 
     func flushSessions() async {
         await engine.flushSessions()
+        await engine.flushGroupSessions()
     }
 
     // MARK: Fingerprints & invites
@@ -181,6 +182,10 @@ struct LiveCryptoService: CryptoService {
             groupID: groupID,
             peerFingerprint: peer?.fingerprint
         )
+        // Cache the raw file key now: after sender-key rotations or a
+        // restart the wrapped key may become un-unwrappable, but the blob
+        // on the relay is still ours to download.
+        await core.noteFileKey(fileKeyData, wrappedKey: wrapped)
         return EncryptedFile(fileURL: blobURL, wrappedKey: wrapped, nonce: Data(), byteCount: byteCount)
     }
 
@@ -193,6 +198,14 @@ struct LiveCryptoService: CryptoService {
         // `nonce` is vestigial: AttachmentCrypto prepends the nonce to the
         // blob (see the framing decision in docs/INTEGRATION.md §3).
         _ = nonce
+        // Fast path: the raw file key cached at send/receipt time. This
+        // survives restarts and sender-key rotations, when the wrapped key
+        // below would no longer unwrap.
+        if let fileKeyData = await core.fileKey(forWrappedKey: wrappedKey) {
+            try AttachmentCrypto.decryptFile(
+                at: ciphertextURL, key: SymmetricKey(data: fileKeyData), to: destinationURL)
+            return
+        }
         let context = await core.attachmentContext(for: wrappedKey)
         let peer: IdentityPublic?
         if let fp = context?.peerFingerprint {
@@ -292,6 +305,66 @@ struct LiveTransportService: TransportService {
 
     func sendEnvelope(_ envelope: OutgoingEnvelope) async throws {
         try await core.sendCiphertext(envelope.ciphertext, conversationID: envelope.conversationID, kind: envelope.kind)
+    }
+
+    /// Re-sends messages stuck in `.sending` (the offline outbox). The app
+    /// calls this on launch and when connectivity returns. Each message is
+    /// re-encrypted fresh (ratchet/sender-key state may have advanced) but
+    /// keeps its original ID, so recipients dedupe redeliveries.
+    func flushOutbox() async {
+        let pending: [Message]
+        do { pending = try await pendingOutbox() } catch { return }
+        for message in pending {
+            await resendOutboxMessage(message)
+        }
+    }
+
+    private func resendOutboxMessage(_ message: Message) async {
+        guard let conversation = try? await fetchConversation(id: message.conversationID) else {
+            // Conversation gone: mark failed so it leaves the outbox.
+            var failed = message
+            failed.status = .failed
+            try? await updateMessage(failed)
+            return
+        }
+        var payload = WirePayload.text(
+            id: message.id,
+            body: message.body,
+            replyToID: message.replyToID,
+            attachment: message.attachment,
+            voiceNote: message.voiceNote,
+            expiresIn: conversation.disappearingInterval
+        )
+        payload.previousFingerprint = await supersededIdentityFingerprint()
+        let sidecar = await core.sidecars.load(id: conversation.id)
+        let recipientKeys: [Data]
+        if let fp = sidecar.dmPeerFingerprint,
+           let peer = await engine.identityPublic(forFingerprint: fp)
+        {
+            recipientKeys = [peer.serialized()]
+        } else {
+            recipientKeys = []
+        }
+        do {
+            let ciphertext = try await encryptMessage(
+                payload.encoded(),
+                conversationID: conversation.id,
+                recipientKeys: recipientKeys
+            )
+            try await sendEnvelope(OutgoingEnvelope(
+                id: message.id,
+                conversationID: conversation.id,
+                ciphertext: ciphertext,
+                kind: .message
+            ))
+            var sent = message
+            sent.status = .sent
+            try? await updateMessage(sent)
+        } catch {
+            // Remains queued; the next flush or a manual retry tries again.
+            // (Never mark failed here: a transient outage must not look
+            // like a permanent failure.)
+        }
     }
 
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws {
@@ -445,6 +518,7 @@ struct LiveTransportService: TransportService {
         let peer = try await peerForContact(contactID)
         let sidecar = await core.sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
         try await core.pkgStore.memberships.setRole(
             conversationID: packageID(conversationID),
             userID: AegisStore.UserID(peer.fingerprint.hexString),
@@ -465,6 +539,7 @@ struct LiveTransportService: TransportService {
     func setAnnouncementOnly(_ enabled: Bool, conversationID: UUID) async throws {
         let sidecar = await core.sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
         var updated = sidecar
         updated.isAnnouncementOnly = enabled
         try await core.sidecars.save(id: conversationID, sidecar: updated)
@@ -482,6 +557,7 @@ struct LiveTransportService: TransportService {
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws {
         let sidecar = await core.sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
         var updated = sidecar
         updated.subtitle = topic
         try await core.sidecars.save(id: conversationID, sidecar: updated)
@@ -509,9 +585,35 @@ struct LiveTransportService: TransportService {
             let mailbox = try await core.engine.groupRoutingMailbox(groupID: groupID)
             await core.unbindAndForget(mailbox: mailbox)
             await core.engine.leaveGroup(groupID: groupID)
+            await core.engine.deletePersistedGroupSession(groupID: groupID)
         }
         try await core.pkgStore.conversations.delete(id: packageID(conversationID))
         await core.sidecars.delete(id: conversationID)
+    }
+
+    func requestGroupJoin(code: String) async throws {
+        try await core.requestGroupJoin(code: code)
+    }
+
+    func approveJoinRequest(_ request: JoinRequest) async throws {
+        guard let peer = await core.engine.identityPublic(forFingerprint: request.requesterFingerprint) else {
+            throw CryptoEngineError.unknownSession
+        }
+        // The requester becomes a contact: the roster UI and future DMs
+        // resolve names/keys through the contact list.
+        let hex = request.requesterFingerprint.hexString
+        let contacts = (try? await core.pkgStore.contacts.list(includeBlocked: true)) ?? []
+        if contacts.contains(where: { $0.identityKeyFingerprint == hex }) == false {
+            try await core.keyDirectory.store(fingerprintHex: hex, identityPublic: peer.serialized())
+            let pkg = AegisStore.Contact(
+                id: AegisStore.UserID(UUID().uuidString),
+                displayName: request.requesterName,
+                identityKeyFingerprint: hex
+            )
+            try await core.pkgStore.contacts.upsert(pkg)
+        }
+        let contactID = await core.resolveContactID(for: request.requesterFingerprint) ?? UUID()
+        try await core.inviteMember(contactID, conversationID: request.conversationID, peer: peer)
     }
 
     // MARK: Identity-change tracking
@@ -611,6 +713,20 @@ struct LiveStoreService: StoreService {
         return out
     }
 
+    /// The offline outbox: outgoing messages still marked `.sending`.
+    func pendingOutbox() async throws -> [Message] {
+        let pkgs = try await pkgStore.messages.pendingOutbox(now: Date())
+        var out: [Message] = []
+        for pkg in pkgs {
+            // Only our own unsent messages belong in the outbox; anything
+            // else is a store inconsistency, not a send candidate.
+            if let appMessage = try? await mapMessage(pkg), appMessage.isFromMe {
+                out.append(appMessage)
+            }
+        }
+        return out
+    }
+
     private func mapMessage(_ pkg: AegisStore.Message) async throws -> Message {
         var attachment: Attachment? = nil
         var voiceNote: VoiceNote? = nil
@@ -629,6 +745,28 @@ struct LiveStoreService: StoreService {
             }
         }
         return StoreMapping.toApp(pkg, localUserID: localUserID, attachment: attachment, voiceNote: voiceNote)
+    }
+
+    /// Eagerly unwraps an inbound attachment's file key while the sender's
+    /// sender key is current, and caches it. Without this, later rotations
+    /// or a restart could strand the blob even though its ciphertext is
+    /// still on the relay (see noteFileKey).
+    private func cacheInboundFileKey(wrappedKey: Data, conversationID: UUID) async {
+        // Skip when we already have it (e.g. our own sent attachments —
+        // encryptAttachment cached the key at wrap time).
+        if await core.fileKey(forWrappedKey: wrappedKey) != nil { return }
+        let sidecar = await core.sidecars.load(id: conversationID)
+        let peer: IdentityPublic?
+        if let fp = sidecar.dmPeerFingerprint {
+            peer = await engine.identityPublic(forFingerprint: fp)
+        } else {
+            peer = nil
+        }
+        if let fileKey = try? await engine.unwrapFileKey(
+            wrappedKey, groupID: sidecar.cryptoGroupID, peer: peer)
+        {
+            await core.noteFileKey(fileKey, wrappedKey: wrappedKey)
+        }
     }
 
     func saveMessage(_ message: Message) async throws {
@@ -654,6 +792,8 @@ struct LiveStoreService: StoreService {
                     groupID: sidecar.cryptoGroupID,
                     peerFingerprint: sidecar.dmPeerFingerprint
                 )
+                // Eagerly cache the file key while the sender key is current.
+                await cacheInboundFileKey(wrappedKey: wrappedKey, conversationID: message.conversationID)
             }
         }
         if let note = message.voiceNote {
@@ -675,6 +815,8 @@ struct LiveStoreService: StoreService {
                     groupID: sidecar.cryptoGroupID,
                     peerFingerprint: sidecar.dmPeerFingerprint
                 )
+                // Eagerly cache the file key while the sender key is current.
+                await cacheInboundFileKey(wrappedKey: wrappedKey, conversationID: message.conversationID)
             }
         }
         try await core.sidecars.save(id: message.conversationID, sidecar: sidecar)
@@ -781,6 +923,18 @@ struct LiveStoreService: StoreService {
                 try await pkgStore.calls.delete(id: record.id)
             }
         }
+    }
+
+    // MARK: Group memberships
+
+    func fetchMembershipRoles(conversationID: UUID) async throws -> [String: MemberRole] {
+        let members = try await pkgStore.memberships.members(of: packageID(conversationID))
+        var out: [String: MemberRole] = [:]
+        out.reserveCapacity(members.count)
+        for member in members {
+            out[member.userID.rawValue] = StoreMapping.memberRole(from: member.role)
+        }
+        return out
     }
 
     // MARK: Storage

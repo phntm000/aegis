@@ -255,6 +255,8 @@ actor MockTransport: TransportService {
         sentEnvelopes.append(envelope)
     }
 
+    func flushOutbox() async {}
+
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws {}
     func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws {}
     func sendScreenshotNotice(conversationID: UUID) async throws {}
@@ -333,6 +335,8 @@ actor MockTransport: TransportService {
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws {}
     func rotateSenderKey(conversationID: UUID) async throws {}
     func leaveConversation(_ conversationID: UUID) async throws {}
+    func requestGroupJoin(code: String) async throws {}
+    func approveJoinRequest(_ request: JoinRequest) async throws {}
 
     // MARK: Identity-change tracking (preview: not simulated)
 
@@ -423,6 +427,10 @@ actor MockStore: StoreService {
             .map { $0 }
     }
 
+    func pendingOutbox() async throws -> [Message] {
+        messages.values.flatMap { $0 }.filter { $0.status == .sending && $0.isFromMe }
+    }
+
     func fetchContacts() async throws -> [Contact] {
         Array(contacts.values).sorted { $0.displayName < $1.displayName }
     }
@@ -446,6 +454,8 @@ actor MockStore: StoreService {
     func clearCallHistory() async throws {
         callRecords.removeAll()
     }
+
+    func fetchMembershipRoles(conversationID: UUID) async throws -> [String: MemberRole] { [:] }
 
     func storageUsage() async throws -> StorageUsage {
         StorageUsage(messagesBytes: 4_200_000, attachmentsBytes: 128_000_000, voiceNotesBytes: 12_000_000)
