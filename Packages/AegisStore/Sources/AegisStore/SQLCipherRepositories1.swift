@@ -31,16 +31,16 @@ extension SQLCipherAegisStore {
             .text(c.networkPolicy.rawValue),
             c.title.map(SQLValue.text) ?? .null,
             .int(Int64(c.keyEpoch)),
-            c.disappearingTimerSeconds.map { .int(Int64($0)) } ?? .null,
+            c.disappearingTimerSeconds.map { SQLValue.int(Int64($0)) } ?? .null,
             sqlBool(c.isArchived),
             sqlBool(c.isMuted),
             sqlBool(c.isPinned),
             sqlBool(c.readReceiptsEnabled),
             sqlBool(c.typingIndicatorsEnabled),
             sqlBool(c.linkPreviewsEnabled),
-            c.lastReadMessageID.map { .text($0.rawValue) } ?? .null,
+            c.lastReadMessageID.map { SQLValue.text($0.rawValue) } ?? .null,
             .int(Int64(c.unreadCount)),
-            c.lastMessageID.map { .text($0.rawValue) } ?? .null,
+            c.lastMessageID.map { SQLValue.text($0.rawValue) } ?? .null,
             sqlDate(c.createdAt),
             sqlDate(c.updatedAt),
         ]
@@ -60,9 +60,9 @@ extension SQLCipherAegisStore {
             readReceiptsEnabled: r.bool("read_receipts"),
             typingIndicatorsEnabled: r.bool("typing_indicators"),
             linkPreviewsEnabled: r.bool("link_previews"),
-            lastReadMessageID: r.string("last_read_message_id").map(MessageID.init),
+            lastReadMessageID: r.string("last_read_message_id").map { MessageID($0) },
             unreadCount: Int(r.int("unread_count") ?? 0),
-            lastMessageID: r.string("last_message_id").map(MessageID.init),
+            lastMessageID: r.string("last_message_id").map { MessageID($0) },
             createdAt: try r.reqDate("created_at"),
             updatedAt: try r.reqDate("updated_at")
         )
@@ -129,7 +129,7 @@ extension SQLCipherAegisStore {
               last_message_id = ?, created_at = ?, updated_at = ?
             WHERE id = ?;
             """,
-            Array(args.dropFirst()) + [.text(c.id.rawValue)]
+            Array(args.dropFirst()) + [.text(conversation.id.rawValue)]
         )
     }
 
@@ -222,7 +222,7 @@ extension SQLCipherAegisStore {
                 """,
                 [.text(m.id.rawValue),
                  sqlDate(m.createdAt),
-                 .int(m.direction == .incoming ? 1 : 0),
+                 .int(m.direction == .incoming ? Int64(1) : Int64(0)),
                  .text(m.conversationID.rawValue)]
             )
         }
@@ -232,13 +232,13 @@ extension SQLCipherAegisStore {
         [
             .text(m.id.rawValue),
             .text(m.conversationID.rawValue),
-            m.senderID.map { .text($0.rawValue) } ?? .null,
+            m.senderID.map { SQLValue.text($0.rawValue) } ?? .null,
             sqlBool(m.isSealedSender),
             .text(m.direction.rawValue),
             .text(m.kind.rawValue),
             m.text.map(SQLValue.text) ?? .null,
-            m.replyToMessageID.map { .text($0.rawValue) } ?? .null,
-            m.threadRootID.map { .text($0.rawValue) } ?? .null,
+            m.replyToMessageID.map { SQLValue.text($0.rawValue) } ?? .null,
+            m.threadRootID.map { SQLValue.text($0.rawValue) } ?? .null,
             .int(Int64(m.editVersion)),
             sqlDate(m.editedAt),
             sqlBool(m.isTombstone),
@@ -251,7 +251,7 @@ extension SQLCipherAegisStore {
             sqlDate(m.readAt),
             .int(Int64(m.secrecyEpoch)),
             try encodeJSON(m.reactions),
-            m.poll.map { try encodeJSON($0) } ?? .null,
+            try m.poll.map(encodeJSON) ?? .null,
             try encodeJSON(m.attachmentIDs),
             sqlDate(m.createdAt),
             sqlDate(m.updatedAt),
@@ -262,13 +262,13 @@ extension SQLCipherAegisStore {
         Message(
             id: MessageID(try r.reqString("id")),
             conversationID: ConversationID(try r.reqString("conversation_id")),
-            senderID: r.string("sender_id").map(UserID.init),
+            senderID: r.string("sender_id").map { UserID($0) },
             isSealedSender: r.bool("is_sealed_sender"),
             direction: MessageDirection(rawValue: try r.reqString("direction")) ?? .incoming,
             kind: MessageKind(rawValue: try r.reqString("kind")) ?? .text,
             text: r.string("text"),
-            replyToMessageID: r.string("reply_to").map(MessageID.init),
-            threadRootID: r.string("thread_root").map(MessageID.init),
+            replyToMessageID: r.string("reply_to").map { MessageID($0) },
+            threadRootID: r.string("thread_root").map { MessageID($0) },
             editVersion: Int(r.int("edit_version") ?? 0),
             editedAt: r.date("edited_at"),
             isTombstone: r.bool("is_tombstone"),

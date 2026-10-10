@@ -19,7 +19,7 @@ public actor SQLCipherAegisStore: AegisDatabase,
     ConversationRepository, MessageRepository, ContactRepository,
     GroupMembershipRepository, AttachmentRepository, CallRecordRepository
 {
-    private let conn: SQLCipherConnection
+    let conn: SQLCipherConnection
     private var transactionDepth = 0
 
     private init(connection: SQLCipherConnection) {
@@ -199,7 +199,7 @@ public actor SQLCipherAegisStore: AegisDatabase,
 
     // MARK: - JSON helpers
 
-    private func encodeJSON<T: Encodable>(_ value: T) throws -> SQLValue {
+    func encodeJSON<T: Encodable>(_ value: T) throws -> SQLValue {
         do {
             let data = try JSONEncoder().encode(value)
             guard let text = String(data: data, encoding: .utf8) else {
@@ -213,7 +213,7 @@ public actor SQLCipherAegisStore: AegisDatabase,
         }
     }
 
-    private func decodeJSON<T: Decodable>(
+    func decodeJSON<T: Decodable>(
         _ text: String?,
         fallback: T
     ) throws -> T {

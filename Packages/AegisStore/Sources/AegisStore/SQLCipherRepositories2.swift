@@ -121,7 +121,7 @@ extension SQLCipherAegisStore {
             .text(m.userID.rawValue),
             .text(m.role.rawValue),
             sqlDate(m.joinedAt),
-            m.addedBy.map { .text($0.rawValue) } ?? .null,
+            m.addedBy.map { SQLValue.text($0.rawValue) } ?? .null,
             .int(Int64(m.joinedAtEpoch)),
             sqlDate(m.updatedAt),
         ]
@@ -133,7 +133,7 @@ extension SQLCipherAegisStore {
             userID: UserID(try r.reqString("user_id")),
             role: MemberRole(rawValue: try r.reqString("role")) ?? .member,
             joinedAt: try r.reqDate("joined_at"),
-            addedBy: r.string("added_by").map(UserID.init),
+            addedBy: r.string("added_by").map { UserID($0) },
             joinedAtEpoch: Int(r.int("joined_at_epoch") ?? 0),
             updatedAt: try r.reqDate("updated_at")
         )
@@ -231,7 +231,7 @@ extension SQLCipherAegisStore {
             "SELECT DISTINCT conversation_id FROM group_membership WHERE user_id = ?;",
             [.text(userID.rawValue)]
         )
-        return rows.compactMap { $0.string("conversation_id") }.map(ConversationID.init)
+        return rows.compactMap { $0.string("conversation_id") }.map { ConversationID($0) }
     }
 }
 

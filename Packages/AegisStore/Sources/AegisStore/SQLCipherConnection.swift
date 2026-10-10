@@ -269,7 +269,7 @@ final class SQLCipherConnection {
         if version < 1 {
             try exec("BEGIN IMMEDIATE;")
             do {
-                try execRaw(Schema.v1)
+                try execRaw(StoreSchema.v1)
                 try execRaw(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (1, \(Date().timeIntervalSince1970));"
                 )
