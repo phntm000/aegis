@@ -113,7 +113,9 @@ private struct ScannerCameraView: UIViewControllerRepresentable {
 
 private final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var onScanned: ((String) -> Void)?
-    private var session: AVCaptureSession?
+    // AVCaptureSession isn't Sendable; deinit is nonisolated. The session is
+    // only ever touched on the main actor (or in deinit), so this is safe.
+    nonisolated(unsafe) private var session: AVCaptureSession?
     private var didFire = false
 
     override func viewDidLoad() {
