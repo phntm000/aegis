@@ -27,6 +27,8 @@ packages:
     path: Packages/AegisTransport
   AegisStore:
     path: Packages/AegisStore
+  WebRTCBridge:
+    path: Packages/WebRTCBridge
 
 targets:
   Aegis:
@@ -49,6 +51,9 @@ targets:
       - package: AegisStore
         products:
           - AegisStore
+      - package: WebRTCBridge
+        products:
+          - WebRTCBridge
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios
@@ -77,6 +82,9 @@ targets:
       - package: AegisCrypto
         products:
           - AegisCrypto
+      - package: WebRTCBridge
+        products:
+          - WebRTCBridge
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.tests

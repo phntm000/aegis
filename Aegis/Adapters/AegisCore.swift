@@ -107,6 +107,29 @@ protocol CallMediaDelegate: AnyObject, Sendable {
     func addIceCandidate(_ candidate: IceCandidate, for callID: UUID) async throws
 }
 
+/// Media controls surfaced to the UI. Implemented by the WebRTC engine;
+/// AegisCore forwards to whichever media layer is attached.
+protocol CallMediaControl: AnyObject, Sendable {
+    /// Informs the engine of the call kind (audio/video) before SDP is created.
+    func noteCallKind(_ kind: CallKind, for callID: UUID)
+    func setMuted(_ muted: Bool, callID: UUID) async throws
+    func setVideoEnabled(_ enabled: Bool, callID: UUID) async throws
+    func setSpeaker(_ enabled: Bool, callID: UUID) async throws
+    func startScreenShare(callID: UUID) async throws
+    func stopScreenShare(callID: UUID) async throws
+    var screenShareSupported: Bool { get }
+    /// Tears down the peer connection and capturers for a finished call.
+    func endCallMedia(_ callID: UUID)
+}
+
+/// Thrown when a media control is invoked with no media engine attached.
+enum CallMediaError: Error, LocalizedError {
+    case engineUnavailable
+    var errorDescription: String? {
+        "Call media engine is unavailable."
+    }
+}
+
 // MARK: - AegisCore
 
 actor AegisCore {
@@ -185,6 +208,9 @@ actor AegisCore {
         /// Empty until the media stack (or signaling) provides them.
         var localDTLSFingerprint: String = ""
         var remoteDTLSFingerprint: String = ""
+        /// The inbound SDP offer, stored when the knock arrives so the
+        /// media engine can answer against the real remote description.
+        var remoteOfferSDP: String = ""
     }
 
     private var activeCalls: [UUID: ActiveCallContext] = [:]
@@ -1008,6 +1034,9 @@ actor AegisCore {
 
     func placeCall(to peer: IdentityPublic, conversationID: UUID, contactID: UUID, kind: CallKind) async throws -> UUID {
         let callID = UUID()
+        // The media layer needs the kind before creating the offer so it
+        // knows whether to start camera capture for the local tracks.
+        (mediaDelegate as? any CallMediaControl)?.noteCallKind(kind, for: callID)
         // SDP comes from the app's WebRTC layer via the media delegate.
         // Without it the knock still goes out (signaling works, media waits).
         var sdp = "", dtlsFingerprint = ""
@@ -1044,7 +1073,11 @@ actor AegisCore {
         activeCalls[callID] = ActiveCallContext(
             callID: callID, conversationID: conversationID, contactID: contactID,
             peerFingerprint: peer.fingerprint, direction: .incoming,
-            remoteDTLSFingerprint: knock.offer.dtlsFingerprint
+            remoteDTLSFingerprint: knock.offer.dtlsFingerprint,
+            remoteOfferSDP: knock.offer.sdp
+        )
+        (mediaDelegate as? any CallMediaControl)?.noteCallKind(
+            knock.mediaKind == "video" ? .video : .audio, for: callID
         )
         incomingCallCont.yield(IncomingCall(
             id: callID,
@@ -1067,11 +1100,13 @@ actor AegisCore {
                 switch control {
                 case .reject, .busy, .hangup:
                     activeCalls.removeValue(forKey: callID)
+                    teardownMedia(for: callID)
                     callStateCont.yield(CallStateEvent(callID: callID, state: .ended))
                 case .ringing:
                     callStateCont.yield(CallStateEvent(callID: callID, state: .ringing))
                 case .acceptedElsewhere:
                     activeCalls.removeValue(forKey: callID)
+                    teardownMedia(for: callID)
                     callStateCont.yield(CallStateEvent(callID: callID, state: .ended))
                 }
             }
@@ -1086,10 +1121,14 @@ actor AegisCore {
             _ = peer
         } else if case .answer(let answer) = signal {
             // The callee's DTLS fingerprint arrives with the answer: both
-            // sides now have what they need for the SAS.
+            // sides now have what they need for the SAS. Hand the SDP to
+            // the media engine so the peer connection can complete.
             activeCalls[callID]?.remoteDTLSFingerprint = answer.dtlsFingerprint
+            try await mediaDelegate?.setRemoteSDP(answer.sdp, for: callID)
             let sas = callSAS(for: callID)
             callStateCont.yield(CallStateEvent(callID: callID, state: .connected, sas: sas))
+        } else if case .ice(let ice) = signal {
+            try await mediaDelegate?.addIceCandidate(ice, for: callID)
         }
     }
 
@@ -1100,13 +1139,58 @@ actor AegisCore {
         try await sendRaw(inner.wire, mailbox: mailbox, ttl: 300, flags: AegisFrame.flagTransportControl)
     }
 
+    /// Trickle-ICE: sends a locally gathered candidate to the peer inside
+    /// an E2EE envelope. Called by the media engine's ICE callback.
+    func sendIceCandidate(_ candidate: IceCandidate, for callID: UUID) async throws {
+        guard let context = activeCalls[callID],
+              let peer = await engine.identityPublic(forFingerprint: context.peerFingerprint)
+        else { return }
+        try await sendCallSignal(.ice(candidate), to: peer)
+    }
+
+    // MARK: - Media controls (forwarded to the attached WebRTC engine)
+
+    private func mediaControl() throws -> any CallMediaControl {
+        guard let control = mediaDelegate as? any CallMediaControl else {
+            throw CallMediaError.engineUnavailable
+        }
+        return control
+    }
+
+    func setCallMuted(_ muted: Bool, callID: UUID) async throws {
+        try await mediaControl().setMuted(muted, callID: callID)
+    }
+
+    func setCallVideoEnabled(_ enabled: Bool, callID: UUID) async throws {
+        try await mediaControl().setVideoEnabled(enabled, callID: callID)
+    }
+
+    func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws {
+        try await mediaControl().setSpeaker(enabled, callID: callID)
+    }
+
+    func startScreenShare(callID: UUID) async throws {
+        try await mediaControl().startScreenShare(callID: callID)
+    }
+
+    func stopScreenShare(callID: UUID) async throws {
+        try await mediaControl().stopScreenShare(callID: callID)
+    }
+
+    /// Tears down the media session for a finished call. Called from every
+    /// path that removes a call from `activeCalls`.
+    private func teardownMedia(for callID: UUID) {
+        (mediaDelegate as? any CallMediaControl)?.endCallMedia(callID)
+        mediaRouter.setVideoSink(nil, for: callID)
+    }
+
     func endCall(_ callID: UUID) async throws {
         guard let context = activeCalls[callID] else { return }
         if let peer = await engine.identityPublic(forFingerprint: context.peerFingerprint) {
             try await sendCallSignal(.control(callID: callID.uuidString, control: .hangup), to: peer)
         }
         activeCalls.removeValue(forKey: callID)
-        mediaRouter.setVideoSink(nil, for: callID)
+        teardownMedia(for: callID)
         callStateCont.yield(CallStateEvent(callID: callID, state: .ended))
     }
 
@@ -1271,7 +1355,13 @@ actor AegisCore {
 
     func dropCall(_ callID: UUID) {
         activeCalls.removeValue(forKey: callID)
-        mediaRouter.setVideoSink(nil, for: callID)
+        teardownMedia(for: callID)
+    }
+
+    /// The inbound SDP offer stored when the knock arrived. The media
+    /// engine answers against this real remote description.
+    func remoteOfferSDP(for callID: UUID) -> String {
+        activeCalls[callID]?.remoteOfferSDP ?? ""
     }
 
     func retryConnection() async {

@@ -15,6 +15,7 @@ import AegisStore
 import AegisTransport
 import CryptoKit
 import Foundation
+import os.log
 
 // MARK: - Live crypto
 
@@ -370,7 +371,9 @@ struct LiveTransportService: TransportService {
         else { throw CryptoEngineError.unknownSession }
         var sdp = "", dtls = ""
         if let delegate = await core.mediaDelegate {
-            let answer = try await delegate.createAnswer(for: callID, offerSDP: "")
+            // Answer against the real inbound offer stored at knock time.
+            let offerSDP = await core.remoteOfferSDP(for: callID)
+            let answer = try await delegate.createAnswer(for: callID, offerSDP: offerSDP)
             sdp = answer.sdp; dtls = answer.dtlsFingerprint
         }
         let answer = CallAnswer(callID: callID.uuidString, sdp: sdp, dtlsFingerprint: dtls)
@@ -391,17 +394,28 @@ struct LiveTransportService: TransportService {
     }
 
     func setCallMuted(_ muted: Bool, callID: UUID) async throws {
-        // Media-pipeline concern; the WebRTC layer observes app state.
-        // Signaled explicitly so peers can show "muted" UI.
-        _ = muted; _ = callID
+        // Real media control: toggles the local audio track. Peers observe
+        // it via the audio stream going silent.
+        try await core.setCallMuted(muted, callID: callID)
     }
 
-    func setCallVideoEnabled(_ enabled: Bool, callID: UUID) async throws { _ = enabled; _ = callID }
-    func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws { _ = enabled; _ = callID }
-    func startScreenShare(callID: UUID) async throws { _ = callID }
-    func stopScreenShare(callID: UUID) async throws { _ = callID }
+    func setCallVideoEnabled(_ enabled: Bool, callID: UUID) async throws {
+        try await core.setCallVideoEnabled(enabled, callID: callID)
+    }
 
-    nonisolated var screenShareSupported: Bool { false }
+    func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws {
+        try await core.setCallSpeaker(enabled, callID: callID)
+    }
+
+    func startScreenShare(callID: UUID) async throws {
+        try await core.startScreenShare(callID: callID)
+    }
+
+    func stopScreenShare(callID: UUID) async throws {
+        try await core.stopScreenShare(callID: callID)
+    }
+
+    nonisolated var screenShareSupported: Bool { true }
 
     func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {
         Task { [core] in await core.mediaRouter.setVideoSink(sink, for: callID) }
@@ -816,6 +830,8 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
     private let cryptoService: LiveCryptoService
     private let transportService: LiveTransportService
     private let storeService: LiveStoreService
+    /// Retained for the app's lifetime: owns all WebRTC peer connections.
+    private let mediaEngine: WebRTCMediaEngine
 
     init() throws {
         // Production persistence: SQLCipher-encrypted database at
@@ -840,6 +856,25 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
         self.cryptoService = LiveCryptoService(core: core)
         self.transportService = LiveTransportService(core: core)
         self.storeService = LiveStoreService(core: core)
+        // Real-time media: the WebRTC engine implements both the SDP/ICE
+        // delegate and the five media controls. Trickle-ICE candidates are
+        // signaled back through the core's E2EE call-signaling path.
+        let mediaEngine = WebRTCMediaEngine()
+        self.mediaEngine = mediaEngine
+        mediaEngine.onLocalIceCandidate = { [core] candidate, callID in
+            Task {
+                do {
+                    try await core.sendIceCandidate(candidate, for: callID)
+                } catch {
+                    Logger(subsystem: "app.aegis.ios", category: "signaling")
+                        .error("Failed to signal ICE candidate: \(error.localizedDescription)")
+                }
+            }
+        }
+        Task {
+            await core.setMediaDelegate(mediaEngine)
+            mediaEngine.attachFrameRouter(await core.mediaRouter)
+        }
     }
 
     /// The core self-boots its transports on init (see AegisCore), so the

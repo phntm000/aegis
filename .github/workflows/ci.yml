@@ -69,6 +69,9 @@ jobs:
       - name: Test AegisTransport
         run: swift test --package-path Packages/AegisTransport
 
+      - name: Build WebRTCBridge (verifies pinned binary URL + checksum)
+        run: swift build --package-path Packages/WebRTCBridge
+
   app:
     name: iOS app (XcodeGen + xcodebuild)
     runs-on: macos-14

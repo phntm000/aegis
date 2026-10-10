@@ -20,8 +20,23 @@ struct ActiveCallView: View {
                 Spacer()
 
                 if let call = appState.activeCall {
-                    AvatarView(displayName: call.contactName, size: 110)
-                        .accessibilityHidden(true)
+                    if call.kind == .video && call.state == .connected {
+                        // Live remote video. The WebRTC layer feeds decoded
+                        // frames through the transport's media router into
+                        // this sink; the avatar returns when video is off.
+                        RemoteVideoView { sink in
+                            appState.transport.setVideoSink(sink, for: call.id)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: 320)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .padding(.horizontal, AegisLayout.m)
+                        .onDisappear {
+                            appState.transport.setVideoSink(nil, for: call.id)
+                        }
+                    } else {
+                        AvatarView(displayName: call.contactName, size: 110)
+                            .accessibilityHidden(true)
+                    }
 
                     VStack(spacing: AegisLayout.xs) {
                         Text(call.contactName)
