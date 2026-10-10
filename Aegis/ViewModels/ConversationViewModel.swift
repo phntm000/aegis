@@ -159,6 +159,13 @@ final class ConversationViewModel: ObservableObject {
         conversation.canSend && appState.connectionState.canSend
     }
 
+    /// Attachments and voice notes send from the primary device only in
+    /// v1 (the linked-device relay carries text); the composer hides those
+    /// affordances on linked devices instead of failing silently.
+    var canSendAttachments: Bool {
+        !appState.isLinkedDevice
+    }
+
     func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSend else { return }
@@ -361,6 +368,10 @@ final class ConversationViewModel: ObservableObject {
     /// `reusingStaged` is true when retrying: `fileURL` is already our
     /// staged copy, so it must not be copied (or deleted on failure) again.
     func sendAttachment(fileURL: URL, filename: String, mimeType: String, reusingStaged: Bool = false) async {
+        guard canSendAttachments else {
+            sendError = "Attachments send from your primary device. This device is linked."
+            return
+        }
         let attachmentID = UUID()
         transfers[attachmentID] = .preparing
         // Stage a private copy: the caller's URL (photo picker / recorder)
@@ -421,6 +432,10 @@ final class ConversationViewModel: ObservableObject {
     }
 
     func sendVoiceNote(fileURL: URL, duration: TimeInterval, levels: [Float], reusingStaged: Bool = false) async {
+        guard canSendAttachments else {
+            sendError = "Voice notes send from your primary device. This device is linked."
+            return
+        }
         let noteID = UUID()
         transfers[noteID] = .preparing
         let staged: URL

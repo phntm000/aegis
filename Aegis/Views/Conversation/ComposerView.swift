@@ -114,15 +114,17 @@ struct ComposerView: View {
 
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: AegisLayout.s) {
-            Button {
-                showingAttachMenu = true
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(AegisColors.accent)
+            if viewModel.canSendAttachments {
+                Button {
+                    showingAttachMenu = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(AegisColors.accent)
+                }
+                .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
+                .accessibilityLabel("Attach a photo or file")
             }
-            .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
-            .accessibilityLabel("Attach a photo or file")
 
             TextField("Message", text: $viewModel.draft, axis: .vertical)
                 .font(AegisType.body)
@@ -132,7 +134,8 @@ struct ComposerView: View {
                 .accessibilityLabel("Message field")
 
             if viewModel.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && viewModel.editingMessage == nil {
+                && viewModel.editingMessage == nil
+                && viewModel.canSendAttachments {
                 Button {
                     startRecording()
                 } label: {
