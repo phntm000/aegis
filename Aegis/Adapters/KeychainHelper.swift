@@ -16,7 +16,35 @@ enum KeychainError: Error, Sendable {
 }
 
 enum KeychainHelper {
+    /// True inside the XCTest runner. The test host app lacks the Keychain
+    /// entitlement, so every SecItem* call fails with errSecMissingEntitlement
+    /// (-34018). Tests therefore use an in-memory dictionary behind the same
+    /// API: they exercise the real call paths without real secrets, and no
+    /// test secret ever reaches the device keychain. Production never takes
+    /// this path.
+    static var isRunningTests: Bool {
+        NSClassFromString("XCTestCase") != nil
+    }
+
+    /// Lock-guarded in-memory stand-in for the keychain, test runs only.
+    private final class TestStore: Sendable {
+        private let lock = NSLock()
+        private var values: [String: Data] = [:]
+        func get(_ key: String) -> Data? { lock.withLock { values[key] } }
+        func set(_ key: String, _ value: Data) { lock.withLock { values[key] = value } }
+        func remove(_ key: String) { lock.withLock { values.removeValue(forKey: key) } }
+    }
+    private static let testStore = TestStore()
+
+    private static func testKey(service: String, account: String) -> String {
+        service + "\u{0}" + account
+    }
+
     static func save(_ data: Data, service: String, account: String) throws {
+        if isRunningTests {
+            testStore.set(testKey(service: service, account: account), data)
+            return
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -36,6 +64,9 @@ enum KeychainHelper {
     }
 
     static func load(service: String, account: String) throws -> Data? {
+        if isRunningTests {
+            return testStore.get(testKey(service: service, account: account))
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -52,6 +83,10 @@ enum KeychainHelper {
     }
 
     static func delete(service: String, account: String) throws {
+        if isRunningTests {
+            testStore.remove(testKey(service: service, account: account))
+            return
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
