@@ -39,7 +39,7 @@ struct SettingsView: View {
                     .accessibilityLabel("Identity settings")
                 }
 
-                Section("Preferences") {
+                Section {
                     settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent) {
                         PrivacySettingsView()
                     }
@@ -52,21 +52,28 @@ struct SettingsView: View {
                     settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success) {
                         AppLockSettingsView(appState: appState)
                     }
+                } header: {
+                    Text("Preferences")
                 }
 
-                Section("Data & network") {
+                Section {
+
                     settingsRow(icon: "internaldrive.fill", title: "Storage", color: AegisColors.textSecondary) {
                         StorageSettingsView(appState: appState)
                     }
                     settingsRow(icon: "server.rack", title: "Relay", color: AegisColors.warning) {
                         RelaySettingsView(appState: appState)
                     }
+                } header: {
+                    Text("Data & network")
                 }
 
                 Section {
                     settingsRow(icon: "info.circle.fill", title: "About Aegis", color: AegisColors.textSecondary) {
                         AboutView()
                     }
+                } header: {
+                    Text("About")
                 }
             }
             .listStyle(.insetGrouped)

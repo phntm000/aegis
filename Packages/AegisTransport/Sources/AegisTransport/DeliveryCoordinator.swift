@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(BackgroundTasks)
+#if os(iOS) && canImport(BackgroundTasks)
 import BackgroundTasks
 #endif
 #if canImport(UserNotifications)
@@ -245,7 +245,7 @@ public final class DeliveryCoordinator: NSObject, @unchecked Sendable {
     public func noteBackground() {
         lock.withLock { backgrounded = true }
         recomputeMode()
-        #if canImport(BackgroundTasks)
+        #if os(iOS) && canImport(BackgroundTasks)
         scheduleBackgroundRefresh()
         #endif
     }
@@ -311,7 +311,7 @@ public final class DeliveryCoordinator: NSObject, @unchecked Sendable {
 
     // MARK: Background refresh (BGAppRefreshTask)
 
-    #if canImport(BackgroundTasks)
+    #if os(iOS) && canImport(BackgroundTasks)
     /// Call once at launch, before `scheduleBackgroundRefresh()`.
     /// Also add the identifier to Info.plist `BGTaskSchedulerPermittedIdentifiers`.
     public func registerBackgroundTasks() {
