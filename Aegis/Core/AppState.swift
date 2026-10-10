@@ -522,11 +522,18 @@ final class AppState: ObservableObject {
               let conversation = try? await store.fetchConversation(id: conversationID),
               conversation.kind == .group || conversation.kind == .channel
         else { return }
+        let requesterName: String
+        if let rawName = payload.joinRequesterName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rawName.isEmpty
+        {
+            requesterName = rawName
+        } else {
+            requesterName = "Unknown"
+        }
         let request = JoinRequest(
             conversationID: conversationID,
             requesterFingerprint: envelope.senderKey,
-            requesterName: payload.joinRequesterName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty ?? "Unknown"
+            requesterName: requesterName
         )
         // De-duplicate: one pending request per requester per group.
         joinRequests.removeAll {

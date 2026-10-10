@@ -140,6 +140,18 @@ second channel (the LAN transport) is the mitigation.
 - Group membership itself can leak via delivery fan-out: sealed sender
   hides senders per-envelope, but a relay watching one envelope fan out
   to N mailboxes learns those N mailboxes are grouped together.
+- **Roles are advisory, not cryptographic.** There is no server, so no
+  authority can enforce "only admins may add members." What the client
+  does: (a) a well-behaved client refuses to *send* moderation controls
+  (add/remove/role/topic/announcement changes) unless the local user's
+  role can moderate; (b) recipients *ignore* moderation controls from
+  senders whose locally-known role cannot moderate; (c) announcement
+  channels are enforced outbound (refuse to send) and inbound (drop
+  non-moderator posts). This closes the trivial self-promotion hole, but
+  a member running a modified client, or anyone who socially engineers an
+  admin into promoting them, can still churn the roster — recipients have
+  no independent way to verify who "should" be an admin. Treat unexpected
+  membership changes as a signal to verify out-of-band.
 
 ### 4.9 Calls
 

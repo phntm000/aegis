@@ -337,7 +337,7 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
         messagesByID.values
             .filter { m in
                 guard m.direction == .outgoing, !m.isTombstone,
-                    m.deliveryState == .queued
+                    m.deliveryState == .queued || m.deliveryState == .failed
                 else { return false }
                 // Scheduled messages stay out of the outbox until fire time.
                 if let fire = m.scheduledFor { return fire <= now }

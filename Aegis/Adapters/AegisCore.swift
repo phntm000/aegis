@@ -74,7 +74,8 @@ struct GroupControlMessage: Codable, Sendable {
     var v: Int = 1
     var groupID: Data
     var epoch: UInt32
-    /// "memberAdded" | "memberRemoved" | "roleChanged" | "topicChanged" | "announcementModeChanged"
+    /// "memberAdded" | "memberRemoved" | "roleChanged" | "topicChanged" |
+    /// "announcementModeChanged" | "blobRequest"
     var kind: String
     var fingerprint: Data?
     var role: String?
@@ -88,6 +89,8 @@ struct GroupControlMessage: Codable, Sendable {
     /// idempotent and self-healing: a member that missed intermediate
     /// changes reconciles to the announcer's truth instead of forking.
     var roster: [String: GroupRosterEntry]?
+    /// For "blobRequest": uploadID hex the requester is missing.
+    var blobUploadID: String? = nil
 }
 
 /// One roster entry in a membership announcement.
@@ -747,8 +750,18 @@ actor AegisCore {
     private func handleIdentitySealedDistribution(_ payload: Data) async {
         do {
             let dist = try await engine.openIdentitySealedDistribution(payload)
-            try await engine.ingestDistribution(
-                dist, groupID: dist.groupID, fromSender: dist.senderID)
+            do {
+                try await engine.ingestDistribution(
+                    dist, groupID: dist.groupID, fromSender: dist.senderID)
+            } catch CryptoEngineError.unknownGroup {
+                // Race: the distribution arrived before the group invite
+                // that creates our session (transports may reorder). Stash
+                // it; handleGroupInvite flushes after joining.
+                var pending = pendingDistributions[dist.groupID.hexString] ?? []
+                if pending.count < 16 { pending.append(dist) }
+                pendingDistributions[dist.groupID.hexString] = pending
+                return
+            }
             // Retry any group frames that were waiting on this key.
             let key = dist.groupID.hexString
             if let pending = pendingGroupFrames[key] {
@@ -756,10 +769,10 @@ actor AegisCore {
                 for pendingFrame in pending { await handleFrame(pendingFrame) }
             }
         } catch {
-            // Authentication failed or unknown group: drop. The membership
-            // announcement carrying the roster may still be in flight; its
-            // arrival populates the roster and the sender re-distributes on
-            // the next rotation.
+            // Authentication failed: drop. The membership announcement
+            // carrying the roster may still be in flight; its arrival
+            // populates the roster and the sender re-distributes on the
+            // next rotation.
         }
     }
 
@@ -848,6 +861,15 @@ actor AegisCore {
         case "groupInvite":
             let invite = try JSONDecoder().decode(GroupInviteInfo.self, from: control.body)
             try await handleGroupInvite(invite, from: peer)
+        case "blobRequest":
+            // A 1:1 peer missed blob chunks we uploaded. Re-transmit from
+            // the sent-blob cache to the conversation's direct mailbox.
+            if let body = try? JSONDecoder().decode(BlobRequestBody.self, from: control.body),
+               let uploadID = Data(hexString: body.uploadID),
+               let mailbox = try? await engine.directRoutingMailbox(peer: peer)
+            {
+                _ = await retransmitBlob(uploadID: uploadID, mailbox: mailbox)
+            }
         case "sessionReset":
             break // peer re-establishes on next outbound; nothing to do
         default:
@@ -871,10 +893,14 @@ actor AegisCore {
             switch inner.kind {
             case "control":
                 let control = try JSONDecoder().decode(GroupControlMessage.self, from: inner.body)
+                try await handleGroupControl(control, conversationID: conversationID, senderFingerprint: groupMessage.senderID)
+            default:
                 // Announcement-only enforcement (inbound): a non-moderator's
-                // client should never send here (outbound is refused), but a
-                // modified client can. Recipients drop such messages rather
-                // than displaying them in a broadcast channel.
+                // client should never send here (outbound is refused in
+                // sendCiphertext), but a modified client can. Recipients
+                // drop such messages rather than displaying them in a
+                // broadcast channel. Control messages are NOT gated here —
+                // each control kind carries its own authorization.
                 let sidecar = await sidecars.load(id: conversationID)
                 if sidecar.isAnnouncementOnly == true {
                     let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
@@ -886,8 +912,6 @@ actor AegisCore {
                     }
                     guard posterCanPost else { return }
                 }
-                try await handleGroupControl(control, conversationID: conversationID, senderFingerprint: groupMessage.senderID)
-            default:
                 envelopeCont.yield(IncomingEnvelope(
                     id: UUID(),
                     conversationID: conversationID,
@@ -972,6 +996,17 @@ actor AegisCore {
                     await sidecars.save(id: conversationID, sidecar: sidecar)
                 }
             }
+        case "blobRequest":
+            // A member missed some (or all) chunks of a blob we uploaded.
+            // Re-transmit from the sent-blob cache; the downloader merges
+            // by chunk index. Anyone may request; the blob is ciphertext.
+            if let uploadHex = control.blobUploadID,
+               let uploadID = Data(hexString: uploadHex),
+               let groupID = await groupIDForConversation(conversationID),
+               let mailbox = try? await engine.groupRoutingMailbox(groupID: groupID)
+            {
+                _ = await retransmitBlob(uploadID: uploadID, mailbox: mailbox)
+            }
         default:
             break
         }
@@ -981,7 +1016,11 @@ actor AegisCore {
         case "memberRemoved": kind = .memberRemoved
         case "roleChanged": kind = .roleChanged
         case "topicChanged": kind = .topicChanged
-        default: kind = .announcementModeChanged
+        case "announcementModeChanged": kind = .announcementModeChanged
+        default:
+            // Non-membership controls (e.g. "blobRequest") are fully
+            // handled above; there is no UI event to emit.
+            return
         }
         groupCont.yield(GroupEvent(
             conversationID: conversationID,
@@ -1304,7 +1343,8 @@ actor AegisCore {
                 try? await engine.ingestDistribution(dist, groupID: dist.groupID, fromSender: dist.senderID)
             }
         }
-        let conversationID = UUID()        var pkg = AegisStore.Conversation(kind: .group)
+        let conversationID = UUID()
+        var pkg = AegisStore.Conversation(kind: .group)
         pkg.id = packageID(conversationID)
         pkg.title = invite.name
         try await pkgStore.conversations.create(pkg)
@@ -1904,6 +1944,11 @@ actor AegisCore {
                 // Bind the source mailbox for the duration of the download.
                 await hub.bind(mailbox)
                 defer { Task.detached { [hub] in await hub.unbind(mailbox) } }
+                // Ask the uploader to re-transmit: on transports without
+                // frame retention (LAN) the chunks would otherwise never
+                // arrive, and this download would hang to the deadline.
+                // Best-effort and idempotent — reassembly dedupes by index.
+                await self.requestBlobRedelivery(uploadID: uploadID, mailbox: mailbox.bytes)
                 var chunks: [UInt32: Data] = [:]
                 var expectedCount: UInt32? = nil
                 let deadline = Date().addingTimeInterval(300)

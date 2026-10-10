@@ -452,7 +452,7 @@ extension SQLCipherAegisStore {
             """
             SELECT * FROM message
             WHERE direction = 'outgoing' AND is_tombstone = 0
-              AND delivery_state = 'queued'
+              AND delivery_state IN ('queued', 'failed')
               AND (scheduled_for IS NULL OR scheduled_for <= ?)
             ORDER BY created_at ASC;
             """,

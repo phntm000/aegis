@@ -100,8 +100,10 @@ public protocol MessageRepository: Sendable {
     /// (content, attachments, chunks, keys). Returns the count wiped.
     /// Called on unlock, on timer, and after sync.
     func expungeDisappeared(now: Date) async throws -> Int
-    /// Outbox: outgoing messages with `deliveryState == .queued`, plus
-    /// messages whose `scheduledFor` fire time has arrived. Ordered oldest-first.
+    /// Outbox: outgoing messages with `deliveryState` in (`.queued`,
+    /// `.failed`) — failed sends are retried on reconnect, keeping their
+    /// original IDs so recipients dedupe — plus messages whose
+    /// `scheduledFor` fire time has arrived. Ordered oldest-first.
     func pendingOutbox(now: Date) async throws -> [Message]
     /// Marks delivery-state transitions. Invalid transitions
     /// (e.g. `.read` -> `.queued`) throw `.invalidArgument`.
