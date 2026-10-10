@@ -82,16 +82,16 @@ struct VoiceRoomSignal: Codable, Sendable {
     /// Conversation UUID string identifying the room.
     var roomID: String
     var senderFingerprintHex: String
-    var senderDisplayName: String?
-    var isMuted: Bool?
-    var isDeafened: Bool?
-    var targetFingerprintHex: String?
+    var senderDisplayName: String? = nil
+    var isMuted: Bool? = nil
+    var isDeafened: Bool? = nil
+    var targetFingerprintHex: String? = nil
     /// UUID string identifying this peer pair's WebRTC session. Chosen by
     /// the offerer and echoed by the answerer so ICE trickles to the right
     /// peer connection on both sides.
-    var callID: String?
-    var sdp: String?
-    var ice: IceCandidate?
+    var callID: String? = nil
+    var sdp: String? = nil
+    var ice: IceCandidate? = nil
 
     /// True when this signal is addressed to the given local fingerprint.
     func isForLocal(_ localFingerprintHex: String) -> Bool {

@@ -980,7 +980,7 @@ final class AppState: ObservableObject {
         for lconv in bundle.conversations {
             var conv = Conversation(
                 id: lconv.id,
-                kind: lconv.kind == "group" ? .group : .direct,
+                kind: ConversationKind(linkedString: lconv.kind),
                 title: lconv.title
             )
             conv.lastMessagePreview = lconv.lastMessagePreview
@@ -1011,7 +1011,7 @@ final class AppState: ObservableObject {
                         existing.lastMessageAt = conv.lastMessageAt
                         try? await store.saveConversation(existing)
                     } else {
-                        var created = Conversation(id: conv.id, kind: conv.kind == "group" ? .group : .direct, title: conv.title)
+                        var created = Conversation(id: conv.id, kind: ConversationKind(linkedString: conv.kind), title: conv.title)
                         created.lastMessagePreview = conv.lastMessagePreview
                         created.lastMessageAt = conv.lastMessageAt
                         try? await store.saveConversation(created)
@@ -1048,7 +1048,8 @@ final class AppState: ObservableObject {
         guard let me = identity,
               let conversation = try? await store.fetchConversation(id: req.conversationID)
         else { return }
-        var message = Message(
+        let message = Message(
+            id: req.messageID,
             conversationID: req.conversationID,
             senderID: me.id,
             isFromMe: true,
@@ -1060,8 +1061,8 @@ final class AppState: ObservableObject {
             voiceNote: nil,
             sentAt: Date()
         )
-        message.id = req.messageID
         try? await store.saveMessage(message)
+        var mutableMessage = message
         do {
             var payload = WirePayload.text(
                 id: req.messageID,
@@ -1083,17 +1084,17 @@ final class AppState: ObservableObject {
                 ciphertext: ciphertext,
                 kind: .message
             ))
-            message.status = .sent
+            mutableMessage.status = .sent
         } catch {
-            message.status = .failed
+            mutableMessage.status = .failed
         }
-        try? await store.updateMessage(message)
+        try? await store.updateMessage(mutableMessage)
         // Echo back to the linked device so its thread shows the message.
         let linked = LinkedIncomingMessage(
-            message: message.asLinked(senderName: me.displayName),
+            message: mutableMessage.asLinked(senderName: me.displayName),
             conversation: LinkedConversation(
                 id: conversation.id, title: conversation.title, kind: "\(conversation.kind)",
-                lastMessagePreview: req.body, lastMessageAt: message.sentAt, unreadCount: 0
+                lastMessagePreview: req.body, lastMessageAt: mutableMessage.sentAt, unreadCount: 0
             )
         )
         if let body = try? JSONEncoder().encode(linked) {
@@ -1140,6 +1141,16 @@ final class AppState: ObservableObject {
     }
 }
 
+private extension ConversationKind {
+    init(linkedString: String) {
+        switch linkedString {
+        case "group": self = .group
+        case "channel": self = .channel
+        default: self = .direct
+        }
+    }
+}
+
 // MARK: - Linked-device model bridges
 
 private extension Message {
@@ -1160,7 +1171,8 @@ private extension Message {
 
 private extension LinkedMessage {
     func asMessage() -> Message {
-        var m = Message(
+        Message(
+            id: id,
             conversationID: conversationID,
             senderID: UUID(),
             isFromMe: isFromMe,
@@ -1172,7 +1184,5 @@ private extension LinkedMessage {
             voiceNote: nil,
             sentAt: sentAt
         )
-        m.id = id
-        return m
     }
 }
