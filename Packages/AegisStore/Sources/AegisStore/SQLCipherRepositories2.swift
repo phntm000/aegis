@@ -513,7 +513,7 @@ extension SQLCipherAegisStore {
 
 // MARK: - SessionRepository
 
-extension SQLCipherAegisStore: SessionRepository {
+extension SQLCipherAegisStore {
     public func save(fingerprint: String, snapshot: Data) async throws {
         try conn.exec(
             """
@@ -558,8 +558,8 @@ extension SQLCipherAegisStore: SessionRepository {
 
 // MARK: - GroupSessionRepository
 
-extension SQLCipherAegisStore: GroupSessionRepository {
-    public func save(groupID: String, snapshot: Data) async throws {
+extension SQLCipherAegisStore {
+    public func saveGroupSession(groupID: String, snapshot: Data) async throws {
         try conn.exec(
             """
             INSERT INTO group_session(group_id, snapshot, updated_at)
@@ -572,7 +572,7 @@ extension SQLCipherAegisStore: GroupSessionRepository {
         )
     }
 
-    public func loadAll() async throws -> [String: Data] {
+    public func loadAllGroupSessions() async throws -> [String: Data] {
         var out: [String: Data] = [:]
         for row in try conn.query("SELECT group_id, snapshot FROM group_session;") {
             guard case .text(let gid) = row["group_id"],
@@ -583,19 +583,19 @@ extension SQLCipherAegisStore: GroupSessionRepository {
         return out
     }
 
-    public func delete(groupID: String) async throws {
+    public func deleteGroupSession(groupID: String) async throws {
         try conn.exec("DELETE FROM group_session WHERE group_id = ?;", [.text(groupID)])
     }
 
-    public func deleteAll() async throws {
+    public func deleteAllGroupSessions() async throws {
         try conn.exec("DELETE FROM group_session;")
     }
 }
 
 // MARK: - AttachmentContextRepository
 
-extension SQLCipherAegisStore: AttachmentContextRepository {
-    public func save(keyHash: String, groupID: Data?, peer: Data?) async throws {
+extension SQLCipherAegisStore {
+    public func saveAttachmentContext(keyHash: String, groupID: Data?, peer: Data?) async throws {
         try conn.exec(
             """
             INSERT INTO attachment_context(key_hash, group_id, peer)
@@ -608,7 +608,7 @@ extension SQLCipherAegisStore: AttachmentContextRepository {
         )
     }
 
-    public func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
+    public func loadAttachmentContext(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
         let rows = try conn.query(
             "SELECT group_id, peer FROM attachment_context WHERE key_hash = ?;",
             [.text(keyHash)]
@@ -621,7 +621,7 @@ extension SQLCipherAegisStore: AttachmentContextRepository {
         return (groupID, peer)
     }
 
-    public func deleteAll() async throws {
+    public func deleteAllAttachmentContexts() async throws {
         try conn.exec("DELETE FROM attachment_context;")
     }
 }

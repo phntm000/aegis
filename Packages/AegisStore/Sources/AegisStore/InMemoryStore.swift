@@ -604,19 +604,19 @@ extension InMemoryAegisStore {
 // MARK: - GroupSessionRepository
 
 extension InMemoryAegisStore {
-    public func save(groupID: String, snapshot: Data) async throws {
+    public func saveGroupSession(groupID: String, snapshot: Data) async throws {
         groupSessionsByID[groupID] = snapshot
     }
 
-    public func loadAll() async throws -> [String: Data] {
+    public func loadAllGroupSessions() async throws -> [String: Data] {
         groupSessionsByID
     }
 
-    public func delete(groupID: String) async throws {
+    public func deleteGroupSession(groupID: String) async throws {
         groupSessionsByID.removeValue(forKey: groupID)
     }
 
-    public func deleteAll() async throws {
+    public func deleteAllGroupSessions() async throws {
         groupSessionsByID.removeAll()
     }
 }
@@ -624,15 +624,15 @@ extension InMemoryAegisStore {
 // MARK: - AttachmentContextRepository
 
 extension InMemoryAegisStore {
-    public func save(keyHash: String, groupID: Data?, peer: Data?) async throws {
+    public func saveAttachmentContext(keyHash: String, groupID: Data?, peer: Data?) async throws {
         attachmentContextsByHash[keyHash] = (groupID, peer)
     }
 
-    public func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
+    public func loadAttachmentContext(keyHash: String) async throws -> (groupID: Data?, peer: Data?)? {
         attachmentContextsByHash[keyHash]
     }
 
-    public func deleteAll() async throws {
+    public func deleteAllAttachmentContexts() async throws {
         attachmentContextsByHash.removeAll()
     }
 }

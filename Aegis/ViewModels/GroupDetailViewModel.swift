@@ -9,15 +9,12 @@ final class GroupDetailViewModel: ObservableObject {
     @Published private(set) var isLoading = true
     @Published var error: String?
     @Published var isWorking = false
-    /// Pending join requests for this group/channel (moderators only).
-    @Published private(set) var joinRequests: [JoinRequest] = []
 
     private(set) var conversation: Conversation
     private let appState: AppState
     // NSObjectProtocol isn't Sendable; deinit is nonisolated. The token is only
     // ever touched on the main actor (or in deinit), so this is safe.
     nonisolated(unsafe) private var groupEventObserver: NSObjectProtocol?
-    nonisolated(unsafe) private var joinRequestObserver: NSObjectProtocol?
 
     private var transport: any TransportService { appState.transport }
     private var store: any StoreService { appState.store }
@@ -29,9 +26,6 @@ final class GroupDetailViewModel: ObservableObject {
 
     deinit {
         if let observer = groupEventObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = joinRequestObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -62,17 +56,6 @@ final class GroupDetailViewModel: ObservableObject {
                 else { return }
                 Task { @MainActor in await self.applyGroupEvent(event) }
             }
-            if joinRequestObserver == nil { // stop() above cleared it; re-add once
-                joinRequestObserver = NotificationCenter.default.addObserver(
-                    forName: .aegisJoinRequest,
-                    object: nil,
-                    queue: .main
-                ) { [weak self] _ in
-                    guard let self else { return }
-                    Task { @MainActor in self.refreshJoinRequests() }
-                }
-            }
-            refreshJoinRequests()
         } catch {
             self.error = error.localizedDescription
         }
@@ -84,35 +67,6 @@ final class GroupDetailViewModel: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             groupEventObserver = nil
         }
-        if let observer = joinRequestObserver {
-            NotificationCenter.default.removeObserver(observer)
-            joinRequestObserver = nil
-        }
-    }
-
-    private func refreshJoinRequests() {
-        joinRequests = appState.joinRequests(for: conversation.id)
-    }
-
-    /// Approves a join request: the requester becomes a contact and is
-    /// invited with a real invite + sender-key distributions.
-    func approveJoinRequest(_ request: JoinRequest) async {
-        guard canModerate else { return }
-        isWorking = true
-        defer { isWorking = false }
-        do {
-            try await appState.approveJoinRequest(request)
-            refreshJoinRequests()
-            try? await refreshRoster()
-            Haptics.notification(.success)
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-
-    func declineJoinRequest(_ request: JoinRequest) {
-        appState.declineJoinRequest(request)
-        refreshJoinRequests()
     }
 
     private func applyGroupEvent(_ event: GroupEvent) async {
@@ -133,66 +87,31 @@ final class GroupDetailViewModel: ObservableObject {
 
     private func refreshRoster() async throws {
         let contacts = try await store.fetchContacts()
-        // Role truth comes from the membership table (updated by inbound
-        // group control messages and invites) — never hardcoded.
-        let roles = (try? await store.fetchMembershipRoles(conversationID: conversation.id)) ?? [:]
-        let crypto = appState.crypto
-        // Fingerprint hex → contact, for name resolution.
-        var contactByFingerprint: [String: Contact] = [:]
-        contactByFingerprint.reserveCapacity(contacts.count)
-        for contact in contacts {
-            contactByFingerprint[crypto.fingerprint(of: contact.identityKey)] = contact
+        let me = try? await appState.crypto.loadIdentity()
+        var members = conversation.memberIDs.compactMap { id -> GroupMember? in
+            guard let contact = contacts.first(where: { $0.id == id }) else { return nil }
+            // Role truth comes from the transport in production; the
+            // conversation snapshot carries our own role.
+            let role: MemberRole = (id == conversation.memberIDs.first) ? .owner : .member
+            return GroupMember(id: id, displayName: contact.displayName, role: role, joinedAt: contact.addedAt)
         }
-        var members: [GroupMember] = []
-        members.reserveCapacity(roles.count)
-        let localFingerprintHex: String?
-        if let me = try? await appState.crypto.loadIdentity() {
-            localFingerprintHex = crypto.fingerprint(of: me.publicKey)
-        } else {
-            localFingerprintHex = nil
-        }
-        for (fingerprintHex, role) in roles {
-            if let contact = contactByFingerprint[fingerprintHex] {
-                let isMe = fingerprintHex == localFingerprintHex
-                members.append(GroupMember(
-                    id: contact.id,
-                    displayName: isMe ? "\(contact.displayName) (you)" : contact.displayName,
-                    role: isMe ? (conversation.myRole ?? role) : role,
-                    joinedAt: contact.addedAt,
-                    fingerprintHex: fingerprintHex
-                ))
-            } else if fingerprintHex != localFingerprintHex {
-                // Member with no contact row yet (e.g. invited by someone
-                // else): show a fingerprint suffix until they are added.
-                members.append(GroupMember(
-                    id: UUID(),
-                    displayName: "···" + fingerprintHex.suffix(8),
-                    role: role,
-                    joinedAt: Date(),
-                    fingerprintHex: fingerprintHex
-                ))
+        if let me {
+            // Ensure the local user appears in the roster.
+            if !members.contains(where: { $0.displayName == me.displayName }) {
+                members.insert(
+                    GroupMember(id: me.id, displayName: "\(me.displayName) (you)",
+                                role: conversation.myRole ?? .member, joinedAt: me.createdAt),
+                    at: 0
+                )
             }
-        }
-        // Stable order: owners, admins, then members, alphabetically.
-        members.sort {
-            if $0.role != $1.role { return roleRank($0.role) < roleRank($1.role) }
-            return $0.displayName < $1.displayName
         }
         info = GroupInfo(
             conversationID: conversation.id,
             description: conversation.subtitle,
             members: members,
-            inviteCode: info?.inviteCode,
+            inviteCode: nil,
             senderKeyStatus: conversation.senderKeyStatus
         )
-    }
-
-    private func roleRank(_ role: MemberRole) -> Int {
-        switch role {
-        case .owner: return 0
-        case .admin: return 1
-        case .member: return 2
-        }
     }
 
     // MARK: - Moderation
@@ -312,8 +231,4 @@ final class GroupDetailViewModel: ObservableObject {
 /// `GroupEvent`. Any number of views may observe; no stream contention.
 extension Notification.Name {
     static let aegisGroupEvent = Notification.Name("aegis.groupEvent")
-    /// Posted when a group/channel join request arrives or the pending
-    /// list changes. `object` is the `JoinRequest` for arrivals, nil for
-    /// list changes (approve/decline).
-    static let aegisJoinRequest = Notification.Name("aegis.joinRequest")
 }

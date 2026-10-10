@@ -201,11 +201,11 @@ public protocol SessionRepository: Sendable {
 /// re-joins groups with fresh sender keys).
 public protocol GroupSessionRepository: Sendable {
     /// Upserts the snapshot for a group (groupID hex).
-    func save(groupID: String, snapshot: Data) async throws
+    func saveGroupSession(groupID: String, snapshot: Data) async throws
     /// Returns all stored group sessions keyed by groupID hex.
-    func loadAll() async throws -> [String: Data]
-    func delete(groupID: String) async throws
-    func deleteAll() async throws
+    func loadAllGroupSessions() async throws -> [String: Data]
+    func deleteGroupSession(groupID: String) async throws
+    func deleteAllGroupSessions() async throws
 }
 
 /// Attachment decryption contexts: wrapped-key SHA-256 hex → the
@@ -215,10 +215,10 @@ public protocol GroupSessionRepository: Sendable {
 public protocol AttachmentContextRepository: Sendable {
     /// Upserts the context. `groupID` is set for group attachments,
     /// `peer` (fingerprint) for 1:1 attachments; exactly one is non-nil.
-    func save(keyHash: String, groupID: Data?, peer: Data?) async throws
+    func saveAttachmentContext(keyHash: String, groupID: Data?, peer: Data?) async throws
     /// Returns the stored context, or nil when unknown.
-    func load(keyHash: String) async throws -> (groupID: Data?, peer: Data?)?
-    func deleteAll() async throws
+    func loadAttachmentContext(keyHash: String) async throws -> (groupID: Data?, peer: Data?)?
+    func deleteAllAttachmentContexts() async throws
 }
 
 // MARK: - Composite store

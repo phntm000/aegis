@@ -268,76 +268,17 @@ final class ConversationViewModel: ObservableObject {
 
     // MARK: - Attachments
 
-    /// An upload that failed before its message existed, kept with its
-    /// staged source file so the user can retry without re-picking.
-    struct PendingUpload: Identifiable, Sendable {
-        enum Kind: Sendable {
-            case attachment(filename: String, mimeType: String)
-            case voiceNote(duration: TimeInterval, levels: [Float])
-        }
-        let id: UUID
-        let kind: Kind
-        /// Plaintext staged copy owned by the view model (deleted on
-        /// success or explicit discard).
-        let sourceURL: URL
-        let errorMessage: String
-
-        var displayName: String {
-            switch kind {
-            case .attachment(let filename, _): return filename
-            case .voiceNote: return "Voice note"
-            }
-        }
-    }
-
-    /// Uploads that failed before a message existed. The composer renders
-    /// these with Retry / Dismiss.
-    @Published private(set) var failedUploads: [PendingUpload] = []
-
-    /// Retry a failed upload from its staged source file.
-    func retryUpload(_ upload: PendingUpload) async {
-        failedUploads.removeAll { $0.id == upload.id }
-        transfers[upload.id] = .preparing
-        switch upload.kind {
-        case .attachment(let filename, let mimeType):
-            await sendAttachment(fileURL: upload.sourceURL, filename: filename, mimeType: mimeType, reusingStaged: true)
-        case .voiceNote(let duration, let levels):
-            await sendVoiceNote(fileURL: upload.sourceURL, duration: duration, levels: levels, reusingStaged: true)
-        }
-    }
-
-    /// Discards a failed upload and deletes its staged source file.
-    func discardUpload(_ upload: PendingUpload) {
-        failedUploads.removeAll { $0.id == upload.id }
-        transfers[upload.id] = nil
-        try? FileManager.default.removeItem(at: upload.sourceURL)
-    }
-
     /// Encrypt → upload with progress → send. The relay only ever sees ciphertext.
-    /// `reusingStaged` is true when retrying: `fileURL` is already our
-    /// staged copy, so it must not be copied (or deleted on failure) again.
-    func sendAttachment(fileURL: URL, filename: String, mimeType: String, reusingStaged: Bool = false) async {
+    func sendAttachment(fileURL: URL, filename: String, mimeType: String) async {
         let attachmentID = UUID()
         transfers[attachmentID] = .preparing
-        // Stage a private copy: the caller's URL (photo picker / recorder)
-        // may disappear or be reused while the upload is in flight.
-        let staged: URL
         do {
-            if reusingStaged {
-                staged = fileURL
-            } else {
-                staged = AegisPaths.ensureStaging().appendingPathComponent("\(attachmentID)-\(filename)")
-                if FileManager.default.fileExists(atPath: staged.path) {
-                    try FileManager.default.removeItem(at: staged)
-                }
-                try FileManager.default.copyItem(at: fileURL, to: staged)
+            let staged = AegisPaths.ensureStaging().appendingPathComponent("\(attachmentID)-\(filename)")
+            if FileManager.default.fileExists(atPath: staged.path) {
+                try FileManager.default.removeItem(at: staged)
             }
-        } catch {
-            transfers[attachmentID] = .failed(error.localizedDescription)
-            sendError = error.localizedDescription
-            return
-        }
-        do {
+            try FileManager.default.copyItem(at: fileURL, to: staged)
+
             let encrypted = try await crypto.encryptAttachment(at: staged, conversationID: conversation.id)
             let thumbnail = makeThumbnail(for: staged, mimeType: mimeType)
 
@@ -358,45 +299,19 @@ final class ConversationViewModel: ObservableObject {
             transfers[attachmentID] = .done
             // Keep the ciphertext staged until the message sends.
             try? FileManager.default.removeItem(at: staged)
-            failedUploads.removeAll { $0.id == attachmentID }
             await sendText(body: nil, replyToID: nil, attachment: attachment, voiceNote: nil)
         } catch {
             transfers[attachmentID] = .failed(error.localizedDescription)
-            // The staged source survives for retry; the composer offers it.
-            let pending = PendingUpload(
-                id: attachmentID,
-                kind: .attachment(filename: filename, mimeType: mimeType),
-                sourceURL: staged,
-                errorMessage: error.localizedDescription
-            )
-            failedUploads.removeAll { $0.id == attachmentID }
-            failedUploads.append(pending)
             sendError = error.localizedDescription
             Haptics.notification(.error)
         }
     }
 
-    func sendVoiceNote(fileURL: URL, duration: TimeInterval, levels: [Float], reusingStaged: Bool = false) async {
+    func sendVoiceNote(fileURL: URL, duration: TimeInterval, levels: [Float]) async {
         let noteID = UUID()
         transfers[noteID] = .preparing
-        let staged: URL
         do {
-            if reusingStaged {
-                staged = fileURL
-            } else {
-                staged = AegisPaths.ensureStaging().appendingPathComponent("\(noteID).m4a")
-                if FileManager.default.fileExists(atPath: staged.path) {
-                    try FileManager.default.removeItem(at: staged)
-                }
-                try FileManager.default.copyItem(at: fileURL, to: staged)
-            }
-        } catch {
-            transfers[noteID] = .failed(error.localizedDescription)
-            sendError = error.localizedDescription
-            return
-        }
-        do {
-            let encrypted = try await crypto.encryptAttachment(at: staged, conversationID: conversation.id)
+            let encrypted = try await crypto.encryptAttachment(at: fileURL, conversationID: conversation.id)
             transfers[noteID] = .inProgress(0)
             for await progress in transport.uploadBlob(from: encrypted.fileURL, conversationID: conversation.id, id: noteID) {
                 transfers[noteID] = .inProgress(progress)
@@ -410,21 +325,11 @@ final class ConversationViewModel: ObservableObject {
             )
             // Persist the decrypted audio locally for instant playback.
             let localURL = AegisPaths.attachmentsDirectory.appendingPathComponent("\(noteID).m4a")
-            try? FileManager.default.copyItem(at: staged, to: localURL)
-            try? FileManager.default.removeItem(at: staged)
+            try? FileManager.default.copyItem(at: fileURL, to: localURL)
             transfers[noteID] = .done
-            failedUploads.removeAll { $0.id == noteID }
             await sendText(body: nil, replyToID: nil, attachment: nil, voiceNote: voiceNote)
         } catch {
             transfers[noteID] = .failed(error.localizedDescription)
-            let pending = PendingUpload(
-                id: noteID,
-                kind: .voiceNote(duration: duration, levels: levels),
-                sourceURL: staged,
-                errorMessage: error.localizedDescription
-            )
-            failedUploads.removeAll { $0.id == noteID }
-            failedUploads.append(pending)
             sendError = error.localizedDescription
             Haptics.notification(.error)
         }

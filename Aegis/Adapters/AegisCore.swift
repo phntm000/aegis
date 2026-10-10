@@ -352,13 +352,13 @@ actor AegisCore {
         let groupSessionRepo = pkgStore.groupSessions
         await engine.configureGroupPersistence(GroupPersistence(
             save: { groupID, envelope in
-                try? await groupSessionRepo.save(groupID: groupID, snapshot: envelope)
+                try? await groupSessionRepo.saveGroupSession(groupID: groupID, snapshot: envelope)
             },
             loadAll: {
-                (try? await groupSessionRepo.loadAll()) ?? [:]
+                (try? await groupSessionRepo.loadAllGroupSessions()) ?? [:]
             },
             delete: { groupID in
-                try? await groupSessionRepo.delete(groupID: groupID)
+                try? await groupSessionRepo.deleteGroupSession(groupID: groupID)
             }
         ))
         await engine.restoreGroupSessions()
@@ -1758,7 +1758,7 @@ actor AegisCore {
         // Fire-and-forget — persistence failures never break the send path.
         let repo = pkgStore.attachmentContexts
         Task.detached {
-            try? await repo.save(keyHash: hash, groupID: groupID, peer: peerFingerprint)
+            try? await repo.saveAttachmentContext(keyHash: hash, groupID: groupID, peer: peerFingerprint)
         }
     }
 
@@ -1767,7 +1767,7 @@ actor AegisCore {
         if let context = attachmentContexts[hash] { return context }
         // Restart path: the in-memory dict is empty; fall back to the
         // persisted context, then warm the cache.
-        if let stored = try? await pkgStore.attachmentContexts.load(keyHash: hash) {
+        if let stored = try? await pkgStore.attachmentContexts.loadAttachmentContext(keyHash: hash) {
             let context = AttachmentContext(groupID: stored.groupID, peerFingerprint: stored.peer)
             attachmentContexts[hash] = context
             return context

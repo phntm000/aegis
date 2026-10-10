@@ -7,18 +7,6 @@ struct GroupMember: Identifiable, Sendable, Codable, Hashable {
     var displayName: String
     var role: MemberRole
     var joinedAt: Date
-    /// 32-byte identity fingerprint hex. Set for members resolved from the
-    /// membership table; used for moderation when the member has no contact
-    /// row yet.
-    var fingerprintHex: String?
-
-    init(id: UUID, displayName: String, role: MemberRole, joinedAt: Date, fingerprintHex: String? = nil) {
-        self.id = id
-        self.displayName = displayName
-        self.role = role
-        self.joinedAt = joinedAt
-        self.fingerprintHex = fingerprintHex
-    }
 }
 
 /// Detail model for the group/channel info screen. Membership truth lives
