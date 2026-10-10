@@ -290,9 +290,4 @@ enum SampleData {
             ?? seed().contacts.first
             ?? Contact(displayName: name, identityKey: Data())
     }
-
-    static func previewGroupInfo() -> GroupInfo {
-        seed().groupInfos.values.first
-            ?? GroupInfo(conversationID: UUID(), members: [], senderKeyStatus: .active)
-    }
 }
