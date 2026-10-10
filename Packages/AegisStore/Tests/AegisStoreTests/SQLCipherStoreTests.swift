@@ -589,14 +589,16 @@ final class SQLCipherStoreTests: XCTestCase {
         let ctx = try await reopened.attachmentContexts.loadAttachmentContext(keyHash: "deadbeef")
         XCTAssertEqual(ctx?.groupID, Data(repeating: 0x01, count: 32))
         XCTAssertNil(ctx?.peer)
-        XCTAssertNil(try await reopened.attachmentContexts.loadAttachmentContext(keyHash: "nope"))
+        let missingCtx = try await reopened.attachmentContexts.loadAttachmentContext(keyHash: "nope")
+        XCTAssertNil(missingCtx)
 
         // Upsert replaces.
         try await reopened.groupSessions.saveGroupSession(groupID: gid, snapshot: Data("v2".utf8))
         let groups2 = try await reopened.groupSessions.loadAllGroupSessions()
         XCTAssertEqual(groups2[gid], Data("v2".utf8))
         try await reopened.groupSessions.deleteGroupSession(groupID: gid)
-        XCTAssertTrue(try await reopened.groupSessions.loadAllGroupSessions().isEmpty)
+        let groupsAfterDelete = try await reopened.groupSessions.loadAllGroupSessions()
+        XCTAssertTrue(groupsAfterDelete.isEmpty)
     }
 
     /// A v2 database (user_version=2, no v3 tables) migrates cleanly to v3.
@@ -611,7 +613,8 @@ final class SQLCipherStoreTests: XCTestCase {
 
         let migrated = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
         store = migrated
-        XCTAssertTrue(try await migrated.groupSessions.loadAllGroupSessions().isEmpty)
+        let migratedGroupsEmpty = try await migrated.groupSessions.loadAllGroupSessions()
+        XCTAssertTrue(migratedGroupsEmpty.isEmpty)
         try await migrated.groupSessions.saveGroupSession(groupID: "bb", snapshot: Data([0x02]))
         let loaded = try await migrated.groupSessions.loadAllGroupSessions()
         XCTAssertEqual(loaded["bb"], Data([0x02]))

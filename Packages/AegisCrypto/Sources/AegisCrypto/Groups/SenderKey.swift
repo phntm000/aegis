@@ -46,7 +46,9 @@ public struct SenderKeyState {
     /// Ed25519 public key authenticating this sender's messages for the epoch.
     public let signingPublicKey: Data
     /// Private signing seed. `nil` for peer states.
-    private let signingSeed: SecureBytes?
+    /// Internal (not private) so `GroupSession.snapshot()` can persist it;
+    /// the seed never leaves the process except into the encrypted store.
+    let signingSeed: SecureBytes?
 
     public init(
         senderID: Data,
