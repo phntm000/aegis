@@ -1,9 +1,9 @@
 # Aegis grind state — updated by workers and the grind watchdog cron.
 # Format: key: value, one per line. Workers update current_item and last_activity_utc.
 
-current_item: fix5-identity-change-detection
-current_item_started_utc: 2026-10-10T08:05:00Z
-last_activity_utc: 2026-10-10T07:58:20Z
+current_item: fix6-webrtc-investigation
+current_item_started_utc: 2026-10-10T08:08:55Z
+last_activity_utc: 2026-10-10T08:08:55Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -28,3 +28,4 @@ notes:
   - fix2-session-persistence: done — RatchetSessionSnapshot (versioned Codable, package tests) + ratchet_session table w/ v2 migration + debounced engine persistence + restore on launch; CI green on run 38032064211 (commit 6810b5c3)
   - fix3-automatic-relay: done — honest automatic relay mode (URL validation/normalization, last-known-good fallback, no placeholder endpoint; immediate+periodic handshake health checks with Settings readout; custom-URL validation+probe on entry; new localNetworkOnly connection state + banner); CI green on run 38032828351 (commit 28e042b6, all 3 jobs)
   - fix4-call-signaling-unification: done — call signaling unified on AegisCrypto package types (CallSignal/CallOffer/CallAnswer/IceCandidate/CallControl/KnockInfo, all Sendable; app-local duplicates deleted); CallSAS hex-string helper + package tests (KnockInfo round-trip, wire-format pinning, SAS); SAS verification ceremony wired into call flow (DTLS fingerprint tracking, SAS on CallStateEvent, ActiveCall UI with match/mismatch states); CI green on run 38033415486 (commit c7838b32)
+fix5-identity-change-detection: done — inbound identity-change detection: sender-key mismatch flags conversation with "Safety number changed" banner, holds new messages until re-verify/dismiss; SafetyNumberView re-verifies new key; 4 engine tests green; CI green.
