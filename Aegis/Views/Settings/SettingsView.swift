@@ -43,7 +43,7 @@ struct SettingsView: View {
                     settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent, destination: AnyView(PrivacySettingsView()))
                     settingsRow(icon: "paintbrush.fill", title: "Appearance", color: Color.purple, destination: AnyView(AppearanceSettingsView()))
                     settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger, destination: AnyView(NotificationsSettingsView(appState: appState)))
-                    settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success, destination: AnyView(AppLockSettingsView(appState: appState)))
+                    settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success, destination: AnyView(AppLockSettingsView()))
                 } header: {
                     Text("Preferences")
                 } footer: {
