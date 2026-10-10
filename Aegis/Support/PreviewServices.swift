@@ -312,7 +312,7 @@ actor MockTransport: TransportService {
     func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws {}
     func startScreenShare(callID: UUID) async throws {}
     func stopScreenShare(callID: UUID) async throws {}
-    func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {}
+    nonisolated func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {}
 
     // MARK: Groups
 

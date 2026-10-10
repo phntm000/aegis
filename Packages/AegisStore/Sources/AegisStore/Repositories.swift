@@ -174,7 +174,7 @@ public protocol CallRecordRepository: Sendable {
 
 /// The single entry point the app holds. Backed in production by the
 /// SQLCipher adapter, in tests/previews by `InMemoryAegisStore`.
-public protocol AegisStore: Sendable {
+public protocol AegisDatabase: Sendable {
     var conversations: any ConversationRepository { get }
     var messages: any MessageRepository { get }
     var contacts: any ContactRepository { get }
@@ -227,7 +227,7 @@ public protocol SQLCipherStoreDescriptor: Sendable {
     /// unlocking it with the device keychain / Secure Enclave flow.
     /// Throws `.encryptionUnavailable` if the key cannot be unwrapped or
     /// the key is wrong. Never creates a plaintext database.
-    static func open(at path: String) async throws -> any AegisStore
+    static func open(at path: String) async throws -> any AegisDatabase
 
     /// Current schema version. Must match Docs/SQLCIPHER.md.
     static var schemaVersion: Int { get }

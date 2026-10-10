@@ -491,7 +491,7 @@ struct LiveTransportService: TransportService {
 
 struct LiveStoreService: StoreService {
     let core: AegisCore
-    var pkgStore: any AegisStore { core.pkgStore }
+    var pkgStore: any AegisDatabase { core.pkgStore }
 
     private var localUserID: UUID { core.localIdentityUUID }
 
@@ -779,7 +779,7 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
     private let storeService: LiveStoreService
 
     init() throws {
-        let pkgStore: any AegisStore = InMemoryAegisStore()
+        let pkgStore: any AegisDatabase = InMemoryAegisStore()
         let sidecars = try ConversationSidecarStore()
         let keyDirectory = try ContactKeyDirectory()
         let engine = CryptoEngine { [pkgStore, keyDirectory] fingerprint in

@@ -35,6 +35,7 @@ struct ScannerView: View {
                         title: "Camera unavailable",
                         message: "The camera can't be used right now."
                     )
+                }
             }
             .navigationTitle("Scan QR code")
             .navigationBarTitleDisplayMode(.inline)

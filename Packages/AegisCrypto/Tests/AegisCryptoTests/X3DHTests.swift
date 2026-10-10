@@ -40,7 +40,7 @@ final class X3DHTests: XCTestCase {
         let (alice, bob, bobKeys) = try makeParties()
         // A bundle with no one-time prekey (contact ran out).
         let bundle = try PreKeyBundle.build(
-            identity: bob.publicView,
+            identity: bob,
             signedPreKey: bobKeys.signedPreKey,
             oneTimePreKey: nil,
             provider: testProvider

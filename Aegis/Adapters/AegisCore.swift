@@ -6,7 +6,7 @@
 // them:
 //
 //   CryptoEngine ── sessions/groups/sealed-sender ──┐
-//   any AegisStore ── encrypted persistence ─────────┼──▶ AegisCore
+//   any AegisDatabase ── encrypted persistence ─────────┼──▶ AegisCore
 //   TransportHub ── LAN + relay WebSocket ───────────┘
 //
 // Layering (see docs/INTEGRATION.md §2):
@@ -127,7 +127,7 @@ actor AegisCore {
     // MARK: Owned packages
 
     let engine: CryptoEngine
-    let pkgStore: any AegisStore
+    let pkgStore: any AegisDatabase
     let sidecars: ConversationSidecarStore
     let keyDirectory: ContactKeyDirectory
 
@@ -183,7 +183,7 @@ actor AegisCore {
 
     init(
         engine: CryptoEngine,
-        pkgStore: any AegisStore,
+        pkgStore: any AegisDatabase,
         sidecars: ConversationSidecarStore,
         keyDirectory: ContactKeyDirectory
     ) {

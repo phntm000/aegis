@@ -91,10 +91,10 @@ enum Formatters {
         return f
     }()
 
-    private static let byteFormatter: ByteCountFormatter = {
+    private static var byteFormatter: ByteCountFormatter {
         let f = ByteCountFormatter()
         f.allowedUnits = [.useKB, .useMB, .useGB]
         f.countStyle = .file
         return f
-    }()
+    }
 }
