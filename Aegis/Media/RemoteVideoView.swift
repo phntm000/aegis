@@ -59,7 +59,7 @@ final class RemoteVideoUIView: UIView, VideoSink {
     /// are immutable after creation and CoreMedia documents them as safe
     /// to hand across queues — the @unchecked box records exactly that.
     nonisolated func renderRemoteFrame(_ sampleBuffer: CMSampleBuffer, forCall callID: UUID) {
-        let box = SendableSampleBuffer(sampleBuffer)
+        let box = SendableSampleBuffer(value: sampleBuffer)
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.enqueueRemoteFrame(box.value)
