@@ -201,7 +201,7 @@ struct ConversationInfoView: View {
 
             Toggle(isOn: Binding(
                 get: { viewModel.conversation.readReceiptsEnabled },
-                set: { Task { @MainActor in await viewModel.setReadReceipts($0) } }
+                set: { newValue in Task { @MainActor in await viewModel.setReadReceipts(newValue) } }
             )) {
                 VStack(alignment: .leading) {
                     Text("Read receipts")
@@ -213,7 +213,7 @@ struct ConversationInfoView: View {
 
             Toggle(isOn: Binding(
                 get: { viewModel.conversation.typingIndicatorsEnabled },
-                set: { Task { @MainActor in await viewModel.setTypingIndicators($0) } }
+                set: { newValue in Task { @MainActor in await viewModel.setTypingIndicators(newValue) } }
             )) {
                 VStack(alignment: .leading) {
                     Text("Typing indicators")
@@ -225,7 +225,7 @@ struct ConversationInfoView: View {
 
             Toggle(isOn: Binding(
                 get: { viewModel.conversation.isMuted },
-                set: { Task { @MainActor in await viewModel.setMuted($0) } }
+                set: { newValue in Task { @MainActor in await viewModel.setMuted(newValue) } }
             )) {
                 Text("Mute notifications")
             }

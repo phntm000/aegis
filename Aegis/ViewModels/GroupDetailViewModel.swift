@@ -42,6 +42,7 @@ final class GroupDetailViewModel: ObservableObject {
             // verified group events on NotificationCenter (see below).
             // Re-entrant: drop any previous observer first.
             stop()
+            let conversationID = conversation.id
             groupEventObserver = NotificationCenter.default.addObserver(
                 forName: .aegisGroupEvent,
                 object: nil,
@@ -49,7 +50,7 @@ final class GroupDetailViewModel: ObservableObject {
             ) { [weak self] note in
                 guard let self,
                       let event = note.object as? GroupEvent,
-                      event.conversationID == self.conversation.id
+                      event.conversationID == conversationID
                 else { return }
                 Task { @MainActor in await self.applyGroupEvent(event) }
             }

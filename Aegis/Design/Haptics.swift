@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Centralized haptics so feedback is consistent and never scattered across views.
+@MainActor
 enum Haptics {
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
         let generator = UIImpactFeedbackGenerator(style: style)

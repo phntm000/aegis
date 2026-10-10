@@ -89,7 +89,7 @@ struct ContactsView: View {
 
                 if !viewModel.blocked.isEmpty {
                     Section {
-                        NavigationLink(value: BlockedListDestination.self) {
+                        NavigationLink(value: BlockedListDestination()) {
                             Label("Blocked", systemImage: "slash.circle")
                                 .badge(viewModel.blocked.count)
                         }

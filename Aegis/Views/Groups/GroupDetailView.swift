@@ -125,7 +125,7 @@ struct GroupDetailView: View {
                 Section("Channel") {
                     Toggle(isOn: Binding(
                         get: { viewModel.conversation.isAnnouncementOnly },
-                        set: { Task { @MainActor in await viewModel.setAnnouncementOnly($0) } }
+                        set: { newValue in Task { @MainActor in await viewModel.setAnnouncementOnly(newValue) } }
                     )) {
                         VStack(alignment: .leading) {
                             Text("Announcement-only")

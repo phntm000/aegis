@@ -161,10 +161,10 @@ actor CryptoEngine {
             // misparse — the contact must re-issue a live invite.
             throw CryptoEngineError.invalidInvite("legacy invite; ask the contact for a fresh Aegis invite")
         }
-        guard trimmed.hasPrefix(invitePrefix) else {
+        guard trimmed.hasPrefix(Self.invitePrefix) else {
             throw CryptoEngineError.invalidInvite("unknown invite format")
         }
-        let parts = trimmed.dropFirst(invitePrefix.count).split(separator: ":", omittingEmptySubsequences: false)
+        let parts = trimmed.dropFirst(Self.invitePrefix.count).split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count >= 2,
               let idData = Data(base64Encoded: String(parts[0]).base64URLDecodedInput())
         else { throw CryptoEngineError.invalidInvite("malformed invite") }
@@ -336,7 +336,7 @@ actor CryptoEngine {
         let session = try GroupSession(
             groupID: groupID,
             founder: identity,
-            initialMembers: members.map { GroupMember(fingerprint: $0.fingerprint, displayName: "") }
+            initialMembers: members.map { AegisCrypto.GroupMember(fingerprint: $0.fingerprint, displayName: "") }
         )
         groupSessions[groupID.hexString] = session
         for member in members { knownIdentities[member.fingerprint.hexString] = member }
@@ -349,7 +349,7 @@ actor CryptoEngine {
             groupID: groupID,
             epoch: epoch,
             joiner: identity,
-            members: members.map { GroupMember(fingerprint: $0.fingerprint, displayName: "") }
+            members: members.map { AegisCrypto.GroupMember(fingerprint: $0.fingerprint, displayName: "") }
         )
         groupSessions[groupID.hexString] = session
         for member in members { knownIdentities[member.fingerprint.hexString] = member }
@@ -396,7 +396,7 @@ actor CryptoEngine {
         var out: [OutgoingDistribution] = []
         for member in add {
             knownIdentities[member.fingerprint.hexString] = member
-            out += try session.addMember(GroupMember(fingerprint: member.fingerprint, displayName: ""))
+            out += try session.addMember(AegisCrypto.GroupMember(fingerprint: member.fingerprint, displayName: ""))
         }
         for fingerprint in remove {
             out += try session.removeMember(fingerprint: fingerprint)
