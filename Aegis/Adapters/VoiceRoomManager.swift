@@ -195,7 +195,7 @@ actor VoiceRoomManager {
             )
             await ensureOffer(to: signal.senderFingerprintHex)
         case .leave:
-            removeParticipant(fingerprintHex: signal.senderFingerprintHex)
+            await removeParticipant(fingerprintHex: signal.senderFingerprintHex)
         case .muteState:
             updateMuteState(
                 fingerprintHex: signal.senderFingerprintHex,
@@ -244,7 +244,7 @@ actor VoiceRoomManager {
         room = current
     }
 
-    private func removeParticipant(fingerprintHex: String) {
+    private func removeParticipant(fingerprintHex: String) async {
         guard var current = room else { return }
         current.participants.removeAll { $0.fingerprintHex == fingerprintHex }
         room = current
@@ -281,7 +281,7 @@ actor VoiceRoomManager {
             signal.targetFingerprintHex = fingerprintHex
             signal.callID = callID.uuidString
             signal.sdp = offer.sdp
-            try await sendSignal(current.conversationID, signal)
+            try await sendSignal(signal, conversationID: current.conversationID)
         } catch {
             peerCallIDs.removeValue(forKey: fingerprintHex)
             log.error("Voice room offer failed: \(error.localizedDescription)")
@@ -314,7 +314,7 @@ actor VoiceRoomManager {
             reply.targetFingerprintHex = signal.senderFingerprintHex
             reply.callID = callIDString
             reply.sdp = answer.sdp
-            try await sendSignal(current.conversationID, reply)
+            try await sendSignal(reply, conversationID: current.conversationID)
         } catch {
             peerCallIDs.removeValue(forKey: signal.senderFingerprintHex)
             log.error("Voice room answer failed: \(error.localizedDescription)")
@@ -375,7 +375,7 @@ actor VoiceRoomManager {
         guard var current = room else { return }
         let stale = current.participants.filter { !$0.isLocal && $0.isStale }
         guard !stale.isEmpty else { return }
-        for p in stale { removeParticipant(fingerprintHex: p.fingerprintHex) }
+        for p in stale { await removeParticipant(fingerprintHex: p.fingerprintHex) }
         _ = current
         emit()
     }
@@ -393,7 +393,7 @@ actor VoiceRoomManager {
         )
         signal.isMuted = current.localMuted
         signal.isDeafened = current.localDeafened
-        try await sendSignal(current.conversationID, signal)
+        try await sendSignal(signal, conversationID: current.conversationID)
     }
 
     private func emit() {
@@ -401,7 +401,7 @@ actor VoiceRoomManager {
     }
 
     /// Stops timers without signaling (used at teardown).
-    func shutdown() {
+    func shutdown() async {
         heartbeatTask?.cancel(); heartbeatTask = nil
         expiryTask?.cancel(); expiryTask = nil
         for (_, callID) in peerCallIDs {
