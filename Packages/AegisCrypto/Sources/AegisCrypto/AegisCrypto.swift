@@ -58,6 +58,11 @@ public enum AegisCryptoError: Error, Equatable, CustomStringConvertible {
     /// No sender-key state for this (sender, epoch); the distribution
     /// message was never received or was evicted.
     case unknownSenderKey
+    /// The initiator claimed a specific one-time prekey id, but we have no
+    /// such prekey (replay, racing initiators, or post-restore pool
+    /// mismatch). The handshake fails explicitly rather than proceeding
+    /// into a DH4-less root key that would die opaquely at AEAD decrypt.
+    case unknownOneTimePreKey
     /// Group message epoch is older than the oldest retained epoch.
     case staleEpoch
     /// A sealed-sender certificate is outside its validity window.
@@ -82,6 +87,7 @@ public enum AegisCryptoError: Error, Equatable, CustomStringConvertible {
         case .noSendingChain: return "no sending chain established yet"
         case .noReceivingChain: return "no receiving chain established yet"
         case .unknownSenderKey: return "no sender key for (sender, epoch)"
+        case .unknownOneTimePreKey: return "claimed one-time prekey not found; handshake aborted"
         case .staleEpoch: return "group message from an evicted epoch"
         case .certificateExpired: return "sealed-sender certificate outside validity window"
         case .unsupportedVersion(let v): return "unsupported wire version \(v)"

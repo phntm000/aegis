@@ -47,6 +47,11 @@ public struct WireEncoder {
     }
 }
 
+/// Strict bounds-checked decoder for the versioned wire formats.
+/// All reads reject trailing bytes and out-of-range offsets so malformed
+/// input fails closed.
+/// TODO(security-audit): fuzz with hostile inputs alongside the envelope
+/// parsers and the backup importer (CRYPTO.md §15.8).
 public struct WireDecoder {
     private let data: Data
     private var offset: Int = 0

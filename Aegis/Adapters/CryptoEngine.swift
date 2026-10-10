@@ -527,6 +527,15 @@ actor CryptoEngine {
             }
         }
         let opk = manager.consumeOneTimePreKey(message.usedOneTimePreKeyID)
+        // Explicit handshake abort when the initiator claimed a specific
+        // OPK we don't have (replay, racing initiators, post-restore pool
+        // mismatch). The nil-claim (noOneTimePreKey) is the legitimate
+        // DH4-less path. Without this, SessionEstablishment.respond would
+        // silently build a DH4-less root key that dies opaquely at the
+        // first AEAD decrypt.
+        if opk == nil, message.usedOneTimePreKeyID != PreKeyBundle.noOneTimePreKey {
+            throw AegisCryptoError.unknownOneTimePreKey
+        }
         let responded = try SessionEstablishment.respond(
             preKeyMessageWire: inner,
             ourIdentity: identity,
@@ -608,6 +617,12 @@ actor CryptoEngine {
         case InnerWireType.preKeyMessage.rawValue:
             let message = try PreKeyMessage.parse(inner)
             let opk = manager.consumeOneTimePreKey(message.usedOneTimePreKeyID)
+            // Same explicit-abort discipline as the sealed-sender path
+            // above: a claimed-but-unknown OPK id fails the handshake here,
+            // not opaquely at the first AEAD decrypt.
+            if opk == nil, message.usedOneTimePreKeyID != PreKeyBundle.noOneTimePreKey {
+                throw AegisCryptoError.unknownOneTimePreKey
+            }
             if sessions[key] != nil,
                message.senderIdentity.fingerprint == peer.fingerprint,
                identity.fingerprint.lexicographicallyPrecedes(peer.fingerprint)
@@ -1076,6 +1091,11 @@ actor CryptoEngine {
         return try JSONEncoder().encode(envelope)
     }
 
+    /// Imports a backup envelope: JSON-decodes, version-checks, then
+    /// Argon2id-unwraps the crypto blob. Wrong passphrases are
+    /// indistinguishable from corrupted files.
+    /// TODO(security-audit): fuzz the backup importer with hostile inputs
+    /// alongside the wire decoders (CRYPTO.md §15.8).
     func importBackup(_ data: Data, passphrase: String) throws -> (IdentityPublic, String, Data) {
         let envelope = try JSONDecoder().decode(BackupEnvelope.self, from: data)
         guard envelope.version == 1 else {

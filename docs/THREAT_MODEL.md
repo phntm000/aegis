@@ -42,7 +42,11 @@ for a skeptical reader. If a claim here sounds like marketing, it is a bug.
 - **Past messages after compromise** (forward secrecy): 1:1 message keys
   are deleted on use and chains ratchet forward; X3DH one-time prekeys
   are deleted on consumption. Stealing today's keys does not decrypt
-  yesterday's ciphertext.
+  yesterday's ciphertext. **Two carve-outs**: (i) sender keys distributed
+  via the AKD1 identity-sealed fallback (§4.8) are recoverable with the
+  recipient's long-term identity key — not forward-secret; (ii) the
+  linked-device paired channel (§4.11) uses a static key with no forward
+  secrecy at all.
 - **Future messages after transient compromise** (post-compromise
   security, 1:1): every received message with a new ratchet key triggers
   a DH ratchet step, healing the session. Groups heal via sender-key
@@ -152,6 +156,15 @@ second channel (the LAN transport) is the mitigation.
   admin into promoting them, can still churn the roster — recipients have
   no independent way to verify who "should" be an admin. Treat unexpected
   membership changes as a signal to verify out-of-band.
+- **Identity-sealed sender-key distributions (AKD1).** When a member has
+  no 1:1 session with a new joiner, the sender key is sealed to the
+  joiner's long-term identity key rather than inside a 1:1 session
+  (CRYPTO.md §8). This fallback is **not forward-secret** — anyone
+  holding the recipient's long-term identity key can recover the
+  distributed sender key — and both 32-byte fingerprints travel in the
+  clear on the wire, leaking more metadata than sealed sender's 16-byte
+  mailbox ID. Trust rests on the distributor's Ed25519 signature
+  verified against roster-authenticated identities.
 
 ### 4.9 Calls
 
@@ -169,6 +182,12 @@ channel (join/leave/mute/deafen/heartbeat). Security properties:
 - **Media confidentiality** inherits the 1:1 call guarantees
   (DTLS-SRTP per peer connection; §4.9). There is no SFU, so no middlebox
   ever holds media keys.
+- **Signal sender binding.** Every voice-room signal's claimed sender
+  fingerprint is bound to the Ed25519-authenticated sender of the
+  enclosing group control message; mismatches are dropped before
+  `VoiceRoomManager` sees them. Without this binding, a malicious group
+  member could forge join/offer signals attributed to another member
+  (the signal body is self-claimed JSON).
 - **Membership binding is social, not cryptographic.** A room's
   participant list is whatever the group's sender-key channel says it
   is. A malicious group member can invite an unlisted listener's client
@@ -176,6 +195,13 @@ channel (join/leave/mute/deafen/heartbeat). Security properties:
   residual risk as a group member re-sharing plaintext (§4.8). The UI
   shows the participant roster; treat unexpected participants as a
   signal to verify.
+- **Mesh IP exposure.** Full-mesh WebRTC means every participant's IP
+  (STUN-reflexive or LAN) is visible to every other participant. There
+  is no TURN-relay option today; participants who need IP privacy from
+  each other should not join the same room.
+- **Presence metadata.** Join/leave/heartbeat signals reveal who is in
+  the room and when, to all members (and to the relay as opaque
+  ciphertext on the group routing mailbox).
 - **Mute/deafen are advisory.** A modified client can ignore another
   participant's mute state and keep transmitting, or keep listening
   while displaying "muted". The protocol cannot enforce client-side
@@ -188,23 +214,31 @@ channel (join/leave/mute/deafen/heartbeat). Security properties:
 ### 4.11 Linked secondary devices (paired-relay model)
 
 A linked device holds **no identity keys**. It pairs over an E2EE channel
-(X25519 ephemeral-ephemeral via QR + 4-word SAS from the DH secret, which
-binds the pairing against MITM) and thereafter relays all traffic through
-the primary device, which performs all cryptographic operations.
+(X25519 ephemeral-ephemeral via QR + 4-word SAS from the DH secret —
+44 bits, 8 bytes → 4 × 11-bit words — which binds the pairing against
+MITM, confirmed by the user comparing both screens) and thereafter
+relays all traffic through the primary device, which performs all
+cryptographic operations.
 
 - **Contact-facing crypto is untouched.** X3DH, Double Ratchet, and
   sender keys terminate at the primary's identity. Contacts see one
   identity; there is no "ghost device" — the linked device never
   presents its own keys to contacts.
-- **Trust boundary moves to the primary↔linked channel.** That channel
-  is AES-GCM with a long-term key from the pairing DH, persisted in the
-  OS Keychain on both sides. If it is compromised, the attacker reads
-  the linked device's synced content (contacts, conversations, recent
-  history from the provisioning bundle, and live message relay).
+- **The paired channel has no forward secrecy.** It is AES-GCM under a
+  **static, never-rotating** key derived at pairing and persisted in the
+  OS Keychain on both sides. A seized channel key decrypts all captured
+  sync traffic, past and future — and sync traffic includes message
+  bodies. The §3 forward-secrecy claims do not cover this channel.
+- **SAS confirmation is UI-only.** The wire does not enforce that the
+  user confirmed the SAS words before the primary sends the provisioning
+  bundle; a modified primary could skip the confirmation step. The
+  pairing ceremony's MITM protection therefore depends on the genuine
+  app on both ends.
 - **The linked device is a full read/write delegate.** Unpairing wipes
   the paired channel keys on both sides (dedicated confirmation UI), but
   content already synced to the linked device cannot be remotely wiped —
-  treat an unpair like a device you no longer control.
+  treat an unpair like a device you no longer control. Unpair delivery
+  is best-effort; there is no cryptographic revocation.
 - **Availability coupling.** The linked device needs the primary
   reachable to send/receive. This is a deliberate usability tradeoff,
   documented in code (`DeviceLinkManager.swift`).

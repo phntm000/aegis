@@ -373,22 +373,31 @@ what the app measured — useful for debugging without phoning home.
 
 ## C. Trust, safety & network
 
-### A29. Multi-device linking (companion devices via QR, per-device keys)
+### A29. Multi-device linking (companion devices via QR, paired-relay model)
 **What.** Link iPads/other iPhones as companion devices by scanning a QR code
-on the primary. Each device generates its *own* identity keypair; the primary
-signs a device certificate binding the companion's key to your identity.
-Message history syncs device-to-device over sealed channels; each device
-maintains its own ratchet state.
+on the primary. The companion holds **no** identity keys — it pairs over an
+E2EE channel (X25519 ephemeral-ephemeral ECDH + 4-word SAS ceremony) and
+thereafter relays all traffic through the primary, which performs all
+cryptographic operations (WhatsApp-Web-style). Message history syncs
+device-to-device over the AES-GCM paired channel.
 **Why it matters.** People work across phone, tablet, and desktop-class
 devices. Single-device messengers lose to incumbents on this alone.
 **Privacy & security.** No cloud holds your keys — linking is a local QR
-ceremony (short-lived, single-use token, 60s expiry). Companions can be
-revoked from any device; revocation rotates group keys and notifies contacts
-with a signed "device removed" event. A stolen companion exposes only what it
-cached, and remote wipe (via a sealed wipe command from the primary, plus
-auto-wipe after N days offline) bounds that window. Honest caveat: multi-device
-multiplies the endpoint-attack surface; the device list screen exists so users
+ceremony. Contacts see exactly one identity; there is no "ghost device."
+The paired channel uses a static, never-rotating key in the OS Keychain:
+it has no forward secrecy, so a seized channel key decrypts captured
+sync traffic (see CRYPTO.md §17 and THREAT_MODEL.md §4.11). Unpairing
+wipes the channel keys on both sides (dedicated confirmation UI) but
+cannot remotely wipe content already synced — treat an unpair like a
+device you no longer control. Honest caveat: multi-device multiplies
+the endpoint-attack surface; the device list screen exists so users
 can audit it.
+**Design note.** An earlier revision of this spec described per-device
+identity keypairs with primary-signed device certificates, per-device
+ratchet state, and revocation-triggered group-key rotation. The shipped
+implementation uses the simpler paired-relay model above; the
+per-device-keys design remains a possible future direction, not the
+current behavior.
 
 ### A30. Contact verification (safety numbers)
 **What.** Every contact has a safety number — a fingerprint of both identity

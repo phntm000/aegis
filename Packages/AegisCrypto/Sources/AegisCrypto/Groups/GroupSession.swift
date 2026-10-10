@@ -194,6 +194,9 @@ public final class GroupSession {
         self.members = updated
         // A removed member's late messages must not decrypt, even within
         // the old-epoch grace window.
+        // TODO(security-audit): confirm the epoch-grace window (current +
+        // previous) cannot be abused to keep a removed member reading new
+        // messages (CRYPTO.md §15.6).
         peerSenderStates = peerSenderStates.filter { updated[$0.key.senderID] != nil }
         epoch = newEpoch
         try rotateOurSenderKey()

@@ -157,6 +157,8 @@ struct SenderCertificate {
 
 public enum SealedSender {
     /// Certificates older than this are rejected (replay bound).
+    /// TODO(security-audit): confirm the 48-hour window matches the
+    /// product's offline-message lifetime (CRYPTO.md §15.5).
     public static let maxCertificateAge: TimeInterval = 48 * 3_600
     /// Tolerance for clock skew into the future.
     public static let maxClockSkew: TimeInterval = 5 * 60

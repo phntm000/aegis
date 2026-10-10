@@ -32,8 +32,9 @@ public enum VerificationState: String, Equatable, Codable {
 }
 
 public enum SafetyNumber {
-    /// Number of SHA-512 iterations. Matches Signal's work factor so the
-    /// safety number cannot be brute-forced cheaply if fingerprints leak.
+    /// Number of SHA-256 iterations after the initial SHA-512. Matches
+    /// Signal's work factor so the safety number cannot be brute-forced
+    /// cheaply if fingerprints leak.
     public static let hashIterations = 5_200
 
     /// Computes the 30-byte safety number for a pair of fingerprints.

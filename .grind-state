@@ -3,7 +3,7 @@
 
 current_item: hardening-audit-polish
 current_item_started_utc: 2026-10-10T10:52:20Z
-last_activity_utc: 2026-10-10T11:20:44Z
+last_activity_utc: 2026-10-10T11:24:17Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -51,3 +51,4 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - watchdog 2026-10-10T11:14:00Z: work ALIVE — remote commits landing (latest a42c875e 11:09:44Z, ~4 min ago; hardening cadence 10:52-11:09Z); last_activity_utc 11:09:32Z; CI run 38047428041 in_progress, previous 38046949015 completed success (green). Per liveness rules, no worker spawned.
   - watchdog 2026-10-10T11:19:00Z: work ALIVE — remote commits landing (latest 9995bf94 11:14:40Z, ~4 min ago; hardening cadence 10:52-11:14Z incl. warning sweep, threat-model update, RFC 8032 vector revert); last_activity_utc 11:14:24Z (~4 min ago); CI run 38047721096 on 9995bf94 completed success (green). Per liveness rules, no worker spawned.
   - hardening-audit-polish: done — launch fatalError replaced with LaunchErrorView (fail-closed + retry); 28 build warnings fixed (zero in our code); force-unwraps eliminated; HIG polish (Dynamic Type, 44pt targets, camera pre-permission rationale); ITSAppUsesNonExemptEncryption + EXPORT_COMPLIANCE.md; TESTFLIGHT.md; threat model gains voice-room + linked-device sections; CRYPTO.md documents AKD1; .ci-logs removed from repo; CI green on 38047721096
+  - watchdog 2026-10-10T11:23:00Z: FULL GRIND COMPLETE — all 9 queue items have explicit done notes (fix1..fix6, phase2, phase3, hardening). Verified via GitHub API: run 38047721096 completed success (the run cited by the worker's done note); final commit 857eacc8 (11:20:51Z, state done-note) triggered run 38048081683 now in progress (monitored silently by CI cron). Queue exhausted; milestone reported to user per 2026-10-10 reporting policy. No worker spawned (work done; nothing to grind).

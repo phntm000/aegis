@@ -102,11 +102,17 @@ spk_sig    = Ed25519(identity_sign, "AegisSPK_v1" || spk_id_BE || spk_pub)
   moment it is consumed. This is what gives the *first* message forward
   secrecy.
 
-Bundles are published to the relay's dumb key-value slot (one slot per
-mailbox ID, last-writer-wins — the relay cannot forge the signatures, so
-a malicious overwrite is detectable: verification fails closed). If the
-bundle has no one-time prekey, X3DH proceeds without the DH4 term; the
-UI should note reduced first-message forward secrecy.
+**Bundle publication (current limitation)**: the relay key-value slot is
+not yet implemented — bundles are exchanged out-of-band today (QR
+invite payload, `invitePayload()`), and X3DH initiation only consumes
+bundles cached from those invites. There is therefore no async
+first-contact with a party you have never exchanged an invite with; the
+spec's "dumb key-value slot (one slot per mailbox ID,
+last-writer-wins — the relay cannot forge the signatures, so a
+malicious overwrite is detectable: verification fails closed)" is the
+target design, not the current behavior. If the bundle has no one-time
+prekey, X3DH proceeds without the DH4 term; the UI should note reduced
+first-message forward secrecy.
 
 ## 5. X3DH key agreement
 
@@ -169,7 +175,7 @@ Initialization: the initiator DH-ratchets immediately with
 keypair *is* her signed-prekey pair, and her first sending chain is born
 when she processes the initiator's first ratchet public key.
 
-**Header** (69 bytes, authenticated but not encrypted):
+**Header** (40 bytes, authenticated but not encrypted):
 `ratchetPub(32) || pn(u32 BE) || n(u32 BE)`, where `pn` is the previous
 sending-chain length (drives skipped-key stashing) and `n` the message
 index.
@@ -190,10 +196,10 @@ confined to a single serial queue (not thread-safe by design).
 
 Two 1:1 wire types, both version-led (`0x01`):
 
-- **`RatchetMessage` (0x01)**: `version || 0x01 || header(69) || nonce(12)
+- **`RatchetMessage` (0x01)**: `version || 0x01 || header(40) || nonce(12)
   || ctLen(u32) || ct || tag(16)`. AAD = `version || 0x01 || header`.
 - **`PreKeyMessage` (0x02)**: `version || 0x02 || ephPub(32) ||
-  usedOPK(u32) || senderIdentity(65) || header(69) || nonce(12) ||
+  usedOPK(u32) || senderIdentity(65) || header(40) || nonce(12) ||
   ctLen(u32) || ct || tag(16)`. AAD covers the X3DH parameters too, so a
   relay cannot swap the ephemeral key or claimed sender identity.
 
@@ -217,11 +223,19 @@ ct   = AES-256-GCM(MK_i, aad: header, pt: pad(message))
 - **Identity-sealed fallback (`AKD1`)**: when no 1:1 session exists with a
   new member (e.g. they were just invited), the distribution is sealed to
   their *identity key* instead: X25519 ECDH (ephemeral × recipient
-  identity key) → HKDF → AES-256-GCM, with the recipient's fingerprint in
-  the AAD binding the envelope to the intended identity, and an Ed25519
-  signature from the distributor verified against the group roster. The
-  joiner accepts it only if the distributor is a roster member. This keeps
-  the "never in the clear" invariant without requiring a prior 1:1 session.
+  long-term identity agreement key) → HKDF (`AegisIdentityKeyDist_v1`,
+  salt = senderFP ‖ recipientFP) → AES-256-GCM, magic `"AKD1"`, Ed25519
+  signature from the distributor verified against `knownIdentities`
+  (populated from roster-authenticated invites/controls). The joiner
+  accepts it only if the distributor is a roster member. **Security
+  properties, stated plainly**: (i) unlike the 1:1-session path this is
+  **not forward-secret** — anyone holding the recipient's long-term
+  identity key can recover the distributed sender key; (ii) **both
+  32-byte fingerprints travel in the clear**
+  (`magic || senderFP || recipientFP || …`), leaking strictly more
+  metadata than sealed sender's 16-byte mailbox ID. The AKD1 fallback
+  keeps the "never in the clear" invariant for the *key material* without
+  requiring a prior 1:1 session, at the cost of these two properties.
 - **Epochs**: every membership change bumps the epoch; the changer
   generates a fresh sender key and distributes it. Removed members get no
   new keys (can't read new messages); added members never get old keys
@@ -247,7 +261,7 @@ Envelopes addressed by 16-byte mailbox ID only. Per envelope:
 eph   = fresh X25519 keypair (never reused)
 key   = HKDF(DH(ephPriv, recipientAgreePub), salt: mailboxID,
              info: "AegisSealed_v1")
-ct    = AES-256-GCM(key, aad: version || mailboxID || ephPub,
+ct    = AES-256-GCM(key, aad: version || wireType || mailboxID || ephPub,
                     pt: pad(cert || innerMessage))
 cert  = fingerprint(32) || timestamp(u64) ||
         Ed25519(senderSign, "AegisSealedCert_v1" || ephPub || mailboxID ||
@@ -264,10 +278,11 @@ buckets (256 B … 64 KiB) to blunt size analysis.
 
 ## 10. Verification ceremonies
 
-- **Safety number**: `SHA-512` iterated 5,200 times over the sorted
-  fingerprints (domain-separated), first 30 bytes, displayed as 75
-  digits in 15 groups of 5. Order-independent; both sides compute the
-  same value and compare out-of-band (voice, in person).
+- **Safety number**: `SHA-512` once over the sorted fingerprints
+  (domain-separated), then `SHA-256` iterated 5,200 times over the digest;
+  first 30 bytes, displayed as 75 digits in 15 groups of 5.
+  Order-independent; both sides compute the same value and compare
+  out-of-band (voice, in person).
 - **QR**: 97-byte payload of both public keys plus the fingerprint, with
   the fingerprint binding re-checked on scan. Contains zero secret
   material — photographing it buys an attacker nothing.
@@ -285,7 +300,11 @@ handshake, so the relay (or a LAN peer) sees only SRTP ciphertext. A
 **ZRTP-style Short Authentication String** — 20 bits from both DTLS
 fingerprints, rendered as 4 unambiguous characters — is read aloud to
 bind the *media* keys to the verified conversation, defeating a media-
-path MITM even if signaling were somehow compromised. Group calls start
+path MITM even if signaling were somehow compromised. **The SAS
+ceremony is implemented for 1:1 calls only** (`callSAS()` /
+`ActiveCallView`); voice rooms (full-mesh group calls) have no per-peer
+SAS ceremony, so the media-path-MITM defense there rests on the E2EE
+signaling channel alone. Group calls start
 as full-mesh WebRTC; an SFU with SFrame is the documented scaling path
 (see `docs/NETWORKING.md`, owned by the transport workstream).
 
@@ -373,7 +392,74 @@ cryptographic envelope contents; how envelopes move is out of scope —
 with one requirement: **sender-key distributions and prekey bundles must
 never traverse the network outside an authenticated E2EE envelope**
 (the bundle is self-authenticating by signature; the distribution is
-not, and relies on the 1:1 session).
+not, and relies on the 1:1 session or the AKD1 identity-sealed fallback
+in §8).
+
+## 17. Linked-device pairing
+
+A companion device holds **no** identity keys; it pairs over an E2EE
+channel and relays all traffic through the primary (WhatsApp-Web-style).
+Pairing runs on a short-lived pairing mailbox HKDF-derived from the QR
+pairing ID:
+
+1. Primary shows a QR payload; secondary scans it and sends `hello`.
+2. Both sides run ephemeral-ephemeral ECDH and derive a 4-word SAS from
+   the DH shared secret (first 8 bytes → 4 × 11-bit words = **44 bits**).
+3. The user compares the words on both screens and taps Confirm; the
+   primary then sends the AES-GCM-sealed provisioning bundle (contacts,
+   conversations, recent history).
+4. Both sides derive and persist a **long-term static paired channel key**
+   in the Keychain.
+
+**Honest limits**: the paired channel has **no forward secrecy and no
+post-compromise security** — the static channel key never rotates and has
+no ratchet, so a seized channel key decrypts all captured sync traffic,
+which includes message bodies. The SAS-match confirmation is enforced in
+the UI flow, **not** on the wire: a modified primary could skip the
+confirmation step. Unpair is a local wipe plus a best-effort
+(best-effort, unauthenticated-by-crypto) message to the peer; there is no
+cryptographic revocation or rotation on unpair.
+
+## 18. Anonymous rendezvous (`openAnonymous`)
+
+First-contact prekey messages can arrive via the sealed-sender path with
+no sender certificate (`SealedSender.openAnonymous`): the certificate
+signature is *not* checked, and trust is deferred entirely to the X3DH
+inner message — a successful X3DH/AEAD decrypt against the claimed
+sender identity is what authenticates the initiator. The trust model for
+first contact is therefore: **anyone able to address the 16-byte
+identity mailbox can initiate X3DH**; the responder's defense is that
+only the true holder of the claimed identity key can complete the
+handshake. (Ordering note: the certificate-fingerprint equality check in
+`decryptPreKeyFromUnknownSender` runs *before* `SessionEstablishment.respond`,
+not after as one code comment suggests — harmless, since X3DH still
+gates trust and a mismatch fails closed either way.)
+
+## 19. Routing mailboxes (dual mailbox scheme)
+
+Two mailbox layers exist:
+
+- **Identity mailbox** (16 bytes): the sealed-sender addressing layer
+  (§9), derived from the identity fingerprint. Stable per identity.
+- **Routing mailboxes** (32 bytes, `RoutingMailbox`): the wire-transport
+  addressing layer, unlinkable to the identity mailbox by construction
+  (independent SHA-256 derivations):
+  - `identityRoute = SHA256("AegisIdentityRoute_v1" || fingerprint)` —
+    used for the first prekey message only. Deterministic and stable per
+    identity; the relay can link pre-session traffic, but everything
+    after the handshake moves to `directRoute`.
+  - `directRoute = SHA256("AegisDirectRoute_v1" || min(fpA,fpB) ||
+    max(fpA,fpB) || ephemeralPub)` — one stable label per 1:1 session,
+    derived from the X3DH ephemeral public key (visible to both parties
+    in the `PreKeyMessage`), never from ratchet state. A fresh handshake
+    yields a fresh, unlinkable label; within a session the relay observes
+    a single stable label (the same exposure Signal's server has by
+    design).
+  - `groupRoute = SHA256("AegisGroupRoute_v1" || groupID || epochBE)` —
+    rotates every epoch (every membership change). The transport binds
+    the current *and* previous epoch's mailbox (matching the crypto
+    layer's epoch grace window) so a membership change never partitions
+    the group mid-adoption.
 
 ## References
 

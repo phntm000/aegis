@@ -334,6 +334,9 @@ public final class PreKeyManager {
     /// - Returns: the prekey, or `nil` if the id was unknown (replay or a
     ///   race between two initiators — the responder must then fail the
     ///   handshake rather than reuse the key).
+    /// TODO(security-audit): one-time-prekey exhaustion behavior under
+    /// active attack (bundle without OPK) and the deletion discipline here
+    /// (CRYPTO.md §15.7).
     @discardableResult
     public func consumeOneTimePreKey(_ id: UInt32) -> OneTimePreKey? {
         guard id != PreKeyBundle.noOneTimePreKey else { return nil }

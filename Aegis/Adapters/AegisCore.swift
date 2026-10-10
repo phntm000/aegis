@@ -1090,10 +1090,15 @@ actor AegisCore {
             }
         case "voiceRoom":
             // Voice-room mesh signaling. The sender-key channel already
-            // authenticates group membership; the signal itself carries the
-            // sender's fingerprint for roster matching.
+            // authenticates group membership; senderFingerprint is the
+            // Ed25519-verified sender of this control message. Bind the
+            // signal's claimed sender to it so a group member cannot forge
+            // join/leave/muteState/offer signals attributed to another
+            // member (the signal body is self-claimed JSON). Mismatches are
+            // dropped rather than processed.
             if let body = control.voiceRoomSignal,
-               let signal = try? JSONDecoder().decode(VoiceRoomSignal.self, from: body)
+               let signal = try? JSONDecoder().decode(VoiceRoomSignal.self, from: body),
+               signal.senderFingerprintHex.lowercased() == senderFingerprint.hexString.lowercased()
             {
                 await handleVoiceRoomSignal(signal)
             }

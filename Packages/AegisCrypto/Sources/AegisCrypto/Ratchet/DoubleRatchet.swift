@@ -22,6 +22,8 @@
 // CryptoKit's opaque `SharedSecret`; see X3DH.swift for why the cascade is
 // sound. Chain keys and root keys stay in opaque `SymmetricKey` handles;
 // only HMAC *outputs* are ever extracted as bytes.
+// TODO(security-audit): confirm the "all inputs required" property holds
+// under the cascade adaptation of Signal's HKDF(RK || DH) (CRYPTO.md §15.3).
 
 import CryptoKit
 import Foundation
