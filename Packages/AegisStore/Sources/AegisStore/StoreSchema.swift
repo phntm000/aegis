@@ -137,7 +137,7 @@ enum StoreSchema {
           transcription,
           content='message',
           content_rowid='rowid',
-          tokenize='unicode61 "remove_diacritics 1"'
+          tokenize='unicode61'
         );
 
         CREATE TRIGGER IF NOT EXISTS message_fts_ai AFTER INSERT ON message BEGIN
