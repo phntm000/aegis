@@ -362,6 +362,7 @@ struct LiveTransportService: TransportService {
             sdp = answer.sdp; dtls = answer.dtlsFingerprint
         }
         let answer = CallAnswer(callID: callID.uuidString, sdp: sdp, dtlsFingerprint: dtls)
+        await core.noteLocalDTLSFingerprint(dtls, for: callID)
         try await core.sendCallSignal(.answer(answer), to: peer)
     }
 

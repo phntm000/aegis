@@ -1,0 +1,29 @@
+# Aegis grind state — updated by workers and the grind watchdog cron.
+# Format: key: value, one per line. Workers update current_item and last_activity_utc.
+
+current_item: fix4-call-signaling-unification
+current_item_started_utc: 2026-10-10T07:03:58Z
+last_activity_utc: 2026-10-10T07:35:00Z
+last_commit_seen: none
+queue:
+  - fix1-sqlcipher-store
+  - fix2-session-persistence
+  - fix3-automatic-relay
+  - fix4-call-signaling-unification
+  - fix5-identity-change-detection
+  - fix6-webrtc-investigation
+  - phase2-groups-media
+  - phase3-calls-rooms-multidevice
+  - hardening-audit-polish
+notes:
+  - fix1: replace InMemoryAegisStore() at Aegis/Adapters/LiveAdapters.swift:782 with SQLCipher-backed store; key from Keychain; must keep CI green
+  - fix6: WebRTC may be infeasible in CI (no SwiftPM binary); honest report required if so
+  - ci-fix 2026-10-10T06:14:50Z: run 38029601947 failed on SQLCipherStore.swift:154 'decodeContact' inaccessible (private in extension, used cross-file in snapshot()); fixed by dropping private (now internal, consistent with sibling decode helpers); full audit of all private members in SQLCipherStore/Repositories1/Repositories2/Connection found no other cross-extension or cross-file uses (conn/encodeJSON/decodeJSON visibility already fixed in 7a4754d2)
+  - ci-fix 2026-10-10T06:18:50Z: run 38030300749 (decodeContact fix) green on app job but package tests failed to compile: 26x 'async call in autoclosure' (XCTAssertEqual(try await ...) etc. in SQLCipherStoreTests.swift) + 1x optional pattern match (guard case E.x = error as? E). Fixed by hoisting try-await into let bindings and binding the optional first. NOTE: a concurrent fix1 worker is alive and pushing to the same branch from this worktree (commits 7a4754d2, 39d21563 "explicit throwing closures"); its 39d21563 preserved these test fixes.
+  - ci-fix 2026-10-10T06:21:44Z: run 38030506810 compiled but all SQLCipherStoreTests failed "no such table: conversation": root cause execRaw() delegated to exec() which uses sqlite3_prepare_v2 (first statement only, rest silently dropped), so StoreSchema.v1's 8 CREATE TABLEs never ran. Fixed execRaw to use sqlite3_exec (safe: triggers contain inner semicolons so naive splitting would corrupt them).
+  - ci-fix 2026-10-10T06:23:46Z: run 38030660356 migration failed "parse error in tokenize directive": StoreSchema.v1 used tokenize='unicode61 "remove_diacritics 2"' — reproduced locally on SQLite 3.45.1 that ANY quoted tokenizer args fail to parse on this build ("remove_diacritics 1" also fails). Fixed to bare tokenize='unicode61' (diacritic folding verified as its default: 'cafe' matches 'Café'); SQLCIPHER.md doc updated to match.
+  - ci-fix 2026-10-10T06:32:59Z: CI GREEN on run 38031227339 (commit 5c0dd5be): iOS app ✅, Swift packages (build+test) ✅, Relay self-test ✅. Remaining 3 test failures were test bugs, fixed: attachment/voice carrier messages now use kind .attachment/.voiceNote (empty .text messages are contract-rejected per testInsertEmptyTextMessageRejected); testPendingOutboxOrdering expectations aligned with InMemory reference semantics (fresh .queued outgoing messages ARE pending). fix1 item NOT marked done — still current.
+  - fix1: done — SQLCipher store replaces InMemoryAegisStore in LiveServiceFactory; CI green on run 38031227339 (all 3 jobs)
+  - fix1-sqlcipher-store: done — SQLCipher v4.19.0 persistent encrypted store replaces InMemoryAegisStore; CI green on run 38031227339 (commit 5c0dd5be)
+  - fix2-session-persistence: done — RatchetSessionSnapshot (versioned Codable, package tests) + ratchet_session table w/ v2 migration + debounced engine persistence + restore on launch; CI green on run 38032064211 (commit 6810b5c3)
+  - fix3-automatic-relay: done — honest automatic relay mode (URL validation/normalization, last-known-good fallback, no placeholder endpoint; immediate+periodic handshake health checks with Settings readout; custom-URL validation+probe on entry; new localNetworkOnly connection state + banner); CI green on run 38032828351 (commit 28e042b6, all 3 jobs)

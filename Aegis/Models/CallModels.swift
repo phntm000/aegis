@@ -47,6 +47,16 @@ struct IncomingCall: Sendable, Hashable {
     let receivedAt: Date
 }
 
+/// Verification ceremony state for the call's Short Authentication String.
+enum CallSASVerification: String, Sendable, Hashable {
+    /// SAS not yet compared (or not available).
+    case unverified
+    /// Both parties confirmed the SAS matches.
+    case verified
+    /// The SAS did not match — possible media-path interception.
+    case mismatch
+}
+
 /// UI state for the active-call screen.
 struct ActiveCall: Sendable, Hashable {
     let id: UUID
@@ -60,6 +70,10 @@ struct ActiveCall: Sendable, Hashable {
     var isVideoEnabled: Bool
     var isScreenSharing: Bool
     var connectedAt: Date?
+    /// The 4-character SAS, once both DTLS fingerprints are known.
+    /// Nil while unavailable — the UI shows no ceremony then.
+    var callSAS: String?
+    var sasVerification: CallSASVerification = .unverified
 
     var elapsed: TimeInterval {
         guard let connectedAt else { return 0 }

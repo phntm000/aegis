@@ -51,6 +51,10 @@ struct ActiveCallView: View {
 
                 Spacer()
 
+                if let call = appState.activeCall, let sas = call.callSAS {
+                    sasVerificationSection(for: call, sas: sas)
+                }
+
                 CallControlsView(viewModel: viewModel)
                     .padding(.bottom, AegisLayout.xxl)
             }
@@ -79,6 +83,65 @@ struct ActiveCallView: View {
         case .connecting: return "Connecting…"
         case .connected: return Formatters.callElapsed(viewModel.elapsed)
         case .ended: return "Ended"
+        }
+    }
+
+    /// The SAS verification ceremony: both parties read the 4 characters
+    /// aloud and confirm they match, binding the media keys to the verified
+    /// conversation (see docs/CRYPTO.md §11). Shown only once both DTLS
+    /// fingerprints are known — no ceremony for a SAS that binds nothing.
+    @ViewBuilder
+    private func sasVerificationSection(for call: ActiveCall, sas: String) -> some View {
+        switch call.sasVerification {
+        case .verified:
+            Label("Call verified", systemImage: "checkmark.shield.fill")
+                .font(AegisType.caption)
+                .foregroundStyle(AegisColors.success)
+                .padding(.horizontal, AegisLayout.m)
+                .padding(.vertical, AegisLayout.xs)
+                .background(AegisColors.surfaceElevated)
+                .clipShape(Capsule())
+                .accessibilityLabel("Call verified. The security codes matched.")
+        case .mismatch:
+            VStack(spacing: AegisLayout.xs) {
+                Label("Security codes don't match", systemImage: "exclamationmark.shield.fill")
+                    .font(AegisType.callout)
+                    .foregroundStyle(AegisColors.danger)
+                Text("Someone may be intercepting this call. Hang up if you're unsure.")
+                    .font(AegisType.caption)
+                    .foregroundStyle(AegisColors.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, AegisLayout.m)
+            .padding(.vertical, AegisLayout.s)
+            .background(AegisColors.danger.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Warning. Security codes don't match. Someone may be intercepting this call.")
+        case .unverified:
+            VStack(spacing: AegisLayout.s) {
+                Text("Verify this call")
+                    .font(AegisType.callout)
+                    .foregroundStyle(AegisColors.textPrimary)
+                Text(sas.map(String.init).joined(separator: " "))
+                    .font(.system(size: 34, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AegisColors.textPrimary)
+                    .accessibilityLabel("Security code: \(sas.map(String.init).joined(separator: ", "))")
+                Text("Read these characters aloud with \(call.contactName). If they match, no one can listen in.")
+                    .font(AegisType.caption)
+                    .foregroundStyle(AegisColors.textSecondary)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: AegisLayout.m) {
+                    Button("They match") { viewModel.confirmSAS(match: true) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Don't match") { viewModel.confirmSAS(match: false) }
+                        .buttonStyle(.bordered)
+                }
+            }
+            .padding(AegisLayout.m)
+            .background(AegisColors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, AegisLayout.m)
         }
     }
 }

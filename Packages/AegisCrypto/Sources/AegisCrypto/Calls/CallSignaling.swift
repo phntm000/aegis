@@ -22,7 +22,7 @@ import Foundation
 // MARK: - Payloads
 
 /// SDP offer + the caller's DTLS certificate fingerprint for pinning.
-public struct CallOffer: Codable, Equatable {
+public struct CallOffer: Codable, Equatable, Sendable {
     /// Random call identifier, shared by all signaling for this call.
     public let callID: String
     public let sdp: String
@@ -43,7 +43,7 @@ public struct CallOffer: Codable, Equatable {
 }
 
 /// SDP answer + the callee's DTLS certificate fingerprint for pinning.
-public struct CallAnswer: Codable, Equatable {
+public struct CallAnswer: Codable, Equatable, Sendable {
     public let callID: String
     public let sdp: String
     public let dtlsFingerprint: String
@@ -58,7 +58,7 @@ public struct CallAnswer: Codable, Equatable {
 }
 
 /// A trickled ICE candidate.
-public struct IceCandidate: Codable, Equatable {
+public struct IceCandidate: Codable, Equatable, Sendable {
     public let callID: String
     public let candidate: String
     public let sdpMLineIndex: Int32
@@ -75,7 +75,7 @@ public struct IceCandidate: Codable, Equatable {
 }
 
 /// Call control messages.
-public enum CallControl: String, Codable, Equatable {
+public enum CallControl: String, Codable, Equatable, Sendable {
     /// The other side is ringing.
     case ringing
     /// Callee declined.
@@ -91,7 +91,7 @@ public enum CallControl: String, Codable, Equatable {
 // MARK: - Envelope
 
 /// A tagged union of signaling payloads, serialized into E2EE envelopes.
-public enum CallSignal: Equatable {
+public enum CallSignal: Equatable, Sendable {
     case offer(CallOffer)
     case answer(CallAnswer)
     case ice(IceCandidate)
@@ -144,6 +144,29 @@ extension CallSignal: Codable {
     }
 }
 
+// MARK: - Knock
+
+/// Call knock body: the sealed "knock" that wakes the callee.
+///
+/// Sent as a short-TTL frame addressed to the callee's rotating mailbox. It
+/// embeds the SDP offer so the callee can ring with full context before any
+/// session message round-trips. This is the single canonical knock type —
+/// the app layer must not define its own.
+public struct KnockInfo: Codable, Equatable, Sendable {
+    public var v: Int = 1
+    public var callID: String
+    public var offer: CallOffer
+    /// "audio" | "video"
+    public var mediaKind: String = "audio"
+
+    public init(v: Int = 1, callID: String, offer: CallOffer, mediaKind: String = "audio") {
+        self.v = v
+        self.callID = callID
+        self.offer = offer
+        self.mediaKind = mediaKind
+    }
+}
+
 // MARK: - Short Authentication String
 
 /// ZRTP-style voice verification for the media path.
@@ -177,5 +200,46 @@ public enum CallSAS {
             value >>= 5
         }
         return String(chars.reversed())
+    }
+
+    /// Computes the SAS from `"SHA-256:AA:BB:…"` hex fingerprint strings
+    /// (the form carried in `CallOffer`/`CallAnswer`).
+    ///
+    /// - Returns: the 4-character SAS, or `nil` when either fingerprint is
+    ///   empty or malformed. A `nil` result means the media stack has not
+    ///   provided real DTLS fingerprints yet — callers must not present a
+    ///   verification ceremony for a SAS that binds nothing.
+    public static func shortAuthString(localHex: String, remoteHex: String) -> String? {
+        guard let local = parseDTLSFingerprintHex(localHex), !local.isEmpty,
+              let remote = parseDTLSFingerprintHex(remoteHex), !remote.isEmpty
+        else { return nil }
+        return shortAuthString(localDTLSFingerprint: local, remoteDTLSFingerprint: remote)
+    }
+
+    /// Parses `"SHA-256:AA:BB:…"` (or a bare hex string) into bytes.
+    /// Returns `nil` for malformed input.
+    static func parseDTLSFingerprintHex(_ s: String) -> Data? {
+        var hex = s
+        if let range = hex.range(of: ":", options: .caseInsensitive) {
+            // Drop a "SHA-256" style algorithm prefix when present.
+            let prefix = hex[..<range.lowerBound]
+            if prefix.caseInsensitiveCompare("SHA-256") == .orderedSame {
+                hex = String(hex[range.upperBound...])
+            }
+        }
+        hex = hex.replacingOccurrences(of: ":", with: "")
+        hex = hex.replacingOccurrences(of: " ", with: "")
+        guard !hex.isEmpty, hex.count % 2 == 0,
+              hex.allSatisfy({ $0.isHexDigit })
+        else { return nil }
+        var data = Data(capacity: hex.count / 2)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+            data.append(byte)
+            index = next
+        }
+        return data
     }
 }

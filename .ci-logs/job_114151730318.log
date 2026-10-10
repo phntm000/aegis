@@ -1,0 +1,852 @@
+﻿2026-10-10T06:27:38.6423550Z Current runner version: '2.337.0'
+2026-10-10T06:27:38.6442020Z ##[group]Runner Image Provisioner
+2026-10-10T06:27:38.6442610Z Hosted Compute Agent
+2026-10-10T06:27:38.6443070Z Version: 20260828.587
+2026-10-10T06:27:38.6443480Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-10-10T06:27:38.6443960Z Build Date: 2026-08-28T16:44:25Z
+2026-10-10T06:27:38.6444910Z Worker ID: {2df10834-2536-4726-806a-16ff5db2e266}
+2026-10-10T06:27:38.6445470Z Azure Region: westus
+2026-10-10T06:27:38.6445840Z ##[endgroup]
+2026-10-10T06:27:38.6447990Z ##[group]Operating System
+2026-10-10T06:27:38.6448380Z macOS
+2026-10-10T06:27:38.6448730Z 14.8.9
+2026-10-10T06:27:38.6449100Z 23J631
+2026-10-10T06:27:38.6449430Z ##[endgroup]
+2026-10-10T06:27:38.6449780Z ##[group]Runner Image
+2026-10-10T06:27:38.6450140Z Image: macos-14-arm64
+2026-10-10T06:27:38.6450560Z Version: 20260831.0302.1
+2026-10-10T06:27:38.6451570Z Included Software: https://github.com/actions/runner-images/blob/macos-14-arm64/20260831.0302/images/macos/macos-14-arm64-Readme.md
+2026-10-10T06:27:38.6453160Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-14-arm64%2F20260831.0302
+2026-10-10T06:27:38.6453830Z ##[endgroup]
+2026-10-10T06:27:38.6454670Z ##[group]GITHUB_TOKEN Permissions
+2026-10-10T06:27:38.6456210Z Contents: read
+2026-10-10T06:27:38.6456850Z Metadata: read
+2026-10-10T06:27:38.6457230Z Packages: read
+2026-10-10T06:27:38.6457590Z ##[endgroup]
+2026-10-10T06:27:38.6459130Z Secret source: Actions
+2026-10-10T06:27:38.6459670Z Cache mode: write
+2026-10-10T06:27:38.6460110Z Prepare workflow directory
+2026-10-10T06:27:38.6882930Z Prepare all required actions
+2026-10-10T06:27:38.6938500Z Getting action download info
+2026-10-10T06:27:39.0959090Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-10T06:27:39.5240010Z Complete job name: Swift packages (build + test)
+2026-10-10T06:27:39.5783780Z ##[group]Run actions/checkout@v4
+2026-10-10T06:27:39.5785220Z with:
+2026-10-10T06:27:39.5785600Z   repository: phntm000/aegis
+2026-10-10T06:27:39.5788570Z   token: ***
+2026-10-10T06:27:39.5788890Z   ssh-strict: true
+2026-10-10T06:27:39.5789650Z   ssh-user: git
+2026-10-10T06:27:39.5791180Z   persist-credentials: true
+2026-10-10T06:27:39.5791590Z   clean: true
+2026-10-10T06:27:39.5791970Z   sparse-checkout-cone-mode: true
+2026-10-10T06:27:39.5792420Z   fetch-depth: 1
+2026-10-10T06:27:39.5792750Z   fetch-tags: false
+2026-10-10T06:27:39.5793080Z   show-progress: true
+2026-10-10T06:27:39.5793420Z   lfs: false
+2026-10-10T06:27:39.5793730Z   submodules: false
+2026-10-10T06:27:39.5794070Z   set-safe-directory: true
+2026-10-10T06:27:39.5794520Z   allow-unsafe-pr-checkout: false
+2026-10-10T06:27:39.5795240Z env:
+2026-10-10T06:27:39.5795590Z   XCODE_APP: /Applications/Xcode_16.2.app
+2026-10-10T06:27:39.5796010Z ##[endgroup]
+2026-10-10T06:27:39.9798210Z Syncing repository: phntm000/aegis
+2026-10-10T06:27:39.9800330Z ##[group]Getting Git version info
+2026-10-10T06:27:39.9801020Z Working directory is '/Users/runner/work/aegis/aegis'
+2026-10-10T06:27:39.9801910Z [command]/opt/homebrew/bin/git version
+2026-10-10T06:27:40.0332840Z git version 2.55.0
+2026-10-10T06:27:40.0353380Z ##[endgroup]
+2026-10-10T06:27:40.0360320Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/61c4db5a-b4e7-409c-9685-ae1332470629/.gitconfig'
+2026-10-10T06:27:40.0371880Z Temporarily overriding HOME='/Users/runner/work/_temp/61c4db5a-b4e7-409c-9685-ae1332470629' before making global git config changes
+2026-10-10T06:27:40.0373600Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-10T06:27:40.0374560Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/aegis/aegis
+2026-10-10T06:27:40.0489000Z Deleting the contents of '/Users/runner/work/aegis/aegis'
+2026-10-10T06:27:40.0492740Z ##[group]Initializing the repository
+2026-10-10T06:27:40.0496400Z [command]/opt/homebrew/bin/git init /Users/runner/work/aegis/aegis
+2026-10-10T06:27:40.0744910Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-10T06:27:40.0748890Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-10T06:27:40.0751170Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-10T06:27:40.0752980Z hint: call:
+2026-10-10T06:27:40.0754220Z hint:
+2026-10-10T06:27:40.0755590Z hint: 	git config --global init.defaultBranch <name>
+2026-10-10T06:27:40.0757020Z hint:
+2026-10-10T06:27:40.0758780Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-10T06:27:40.0759700Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-10T06:27:40.0760470Z hint:
+2026-10-10T06:27:40.0760910Z hint: 	git branch -m <name>
+2026-10-10T06:27:40.0761370Z hint:
+2026-10-10T06:27:40.0761990Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-10T06:27:40.0762860Z Initialized empty Git repository in /Users/runner/work/aegis/aegis/.git/
+2026-10-10T06:27:40.0765160Z [command]/opt/homebrew/bin/git remote add origin https://github.com/phntm000/aegis
+2026-10-10T06:27:40.0922960Z ##[endgroup]
+2026-10-10T06:27:40.0923740Z ##[group]Disabling automatic garbage collection
+2026-10-10T06:27:40.0924410Z [command]/opt/homebrew/bin/git config --local gc.auto 0
+2026-10-10T06:27:40.0925780Z ##[endgroup]
+2026-10-10T06:27:40.0926430Z ##[group]Setting up auth
+2026-10-10T06:27:40.0929730Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-10T06:27:40.0977900Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-10T06:27:40.1626870Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-10T06:27:40.1695890Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-10T06:27:40.2322930Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-10T06:27:40.2368190Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-10T06:27:40.2972510Z [command]/opt/homebrew/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-10T06:27:40.3044150Z ##[endgroup]
+2026-10-10T06:27:40.3052110Z ##[group]Fetching the repository
+2026-10-10T06:27:40.3057440Z [command]/opt/homebrew/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b055a38004c97454f0e04245bf0a1efbcf3239ed:refs/remotes/origin/main
+2026-10-10T06:27:41.2358740Z From https://github.com/phntm000/aegis
+2026-10-10T06:27:41.2360560Z  * [new ref]         b055a38004c97454f0e04245bf0a1efbcf3239ed -> origin/main
+2026-10-10T06:27:41.2363980Z ##[endgroup]
+2026-10-10T06:27:41.2365080Z ##[group]Determining the checkout info
+2026-10-10T06:27:41.2394920Z ##[endgroup]
+2026-10-10T06:27:41.2395600Z [command]/opt/homebrew/bin/git sparse-checkout disable
+2026-10-10T06:27:41.2424330Z [command]/opt/homebrew/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-10T06:27:41.2479260Z ##[group]Checking out the ref
+2026-10-10T06:27:41.2487210Z [command]/opt/homebrew/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-10-10T06:27:41.2993600Z Switched to a new branch 'main'
+2026-10-10T06:27:41.3016430Z branch 'main' set up to track 'origin/main'.
+2026-10-10T06:27:41.3018440Z ##[endgroup]
+2026-10-10T06:27:41.3117290Z [command]/opt/homebrew/bin/git log -1 --format=%H
+2026-10-10T06:27:41.3213000Z b055a38004c97454f0e04245bf0a1efbcf3239ed
+2026-10-10T06:27:41.3529150Z ##[group]Run sudo xcode-select -s "$XCODE_APP"
+2026-10-10T06:27:41.3529730Z [36;1msudo xcode-select -s "$XCODE_APP"[0m
+2026-10-10T06:27:41.3627960Z shell: /bin/bash -e {0}
+2026-10-10T06:27:41.3628370Z env:
+2026-10-10T06:27:41.3628700Z   XCODE_APP: /Applications/Xcode_16.2.app
+2026-10-10T06:27:41.3629160Z ##[endgroup]
+2026-10-10T06:27:41.4466320Z ##[group]Run swift --version
+2026-10-10T06:27:41.4466870Z [36;1mswift --version[0m
+2026-10-10T06:27:41.4529800Z shell: /bin/bash -e {0}
+2026-10-10T06:27:41.4530180Z env:
+2026-10-10T06:27:41.4530580Z   XCODE_APP: /Applications/Xcode_16.2.app
+2026-10-10T06:27:41.4530950Z ##[endgroup]
+2026-10-10T06:27:45.8762760Z Apple Swift version 6.0.3 (swiftlang-6.0.3.1.10 clang-1600.0.30.1)
+2026-10-10T06:27:45.8763500Z Target: arm64-apple-macosx14.0
+2026-10-10T06:27:45.8808340Z swift-driver version: 1.115.1 
+2026-10-10T06:27:45.8846180Z ##[group]Run swift test --package-path Packages/AegisStore
+2026-10-10T06:27:45.8846580Z [36;1mswift test --package-path Packages/AegisStore[0m
+2026-10-10T06:27:45.8905960Z shell: /bin/bash -e {0}
+2026-10-10T06:27:45.8906170Z env:
+2026-10-10T06:27:45.8906460Z   XCODE_APP: /Applications/Xcode_16.2.app
+2026-10-10T06:27:45.8906780Z ##[endgroup]
+2026-10-10T06:27:48.8733360Z Building for debugging...
+2026-10-10T06:27:48.8793430Z [0/8] /Users/runner/work/aegis/aegis/Packages/AegisStore/.build/arm64-apple-macosx/debug/AegisStorePackageTests.derived/runner.swift
+2026-10-10T06:27:48.8850210Z [0/8] Write sources
+2026-10-10T06:27:49.0540930Z [4/8] Write swift-version-4657CCE4B953477C.txt
+2026-10-10T06:27:53.9978160Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:33131:23: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:53.9980110Z  33131 |         szBufNeeded = MAX(e2,0)+(i64)precision+(i64)width+10;
+2026-10-10T06:27:53.9981130Z        |                       ^
+2026-10-10T06:27:53.9982080Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:53.9989310Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:53.9989960Z       |         ^
+2026-10-10T06:27:53.9990500Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:53.9991180Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:53.9991670Z        |          ^
+2026-10-10T06:27:53.9992420Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:69339:19: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:53.9993370Z  69339 |       u32 iLast = MIN(iLastFrame, HASHTABLE_NPAGE_ONE+iPg*HASHTABLE_NPAGE);
+2026-10-10T06:27:53.9993850Z        |                   ^
+2026-10-10T06:27:53.9994710Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:53.9996510Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:53.9997270Z       |         ^
+2026-10-10T06:27:53.9998710Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0000120Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0000830Z        |          ^
+2026-10-10T06:27:54.0002270Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:75446:32: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0004530Z  75446 |     rc = defragmentPage(pPage, MIN(4, pPage->nFree - (2+nByte)));
+2026-10-10T06:27:54.0005430Z        |                                ^
+2026-10-10T06:27:54.0007240Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0009220Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0009890Z       |         ^
+2026-10-10T06:27:54.0011440Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0019310Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0019690Z        |          ^
+2026-10-10T06:27:54.0020270Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:76159:43: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0021050Z  76159 |       char *zFullPathname = sqlite3Malloc(MAX(nFullPathname,nFilename));
+2026-10-10T06:27:54.0021460Z        |                                           ^
+2026-10-10T06:27:54.0022850Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0023620Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0023900Z       |         ^
+2026-10-10T06:27:54.0024440Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0025140Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0025390Z        |          ^
+2026-10-10T06:27:54.0026010Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:78980:11: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0026700Z  78980 |     amt = MAX(0, (int)(pCur->pPage->aDataEnd - pCur->info.pPayload));
+2026-10-10T06:27:54.0027120Z        |           ^
+2026-10-10T06:27:54.0027750Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0028460Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0028710Z       |         ^
+2026-10-10T06:27:54.0029170Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0029950Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0030300Z        |          ^
+2026-10-10T06:27:54.0030910Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:81476:16: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0031850Z  81476 |     int nAdd = MIN(nNew,iOld-iNew);
+2026-10-10T06:27:54.0032110Z        |                ^
+2026-10-10T06:27:54.0032830Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0033520Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0033820Z       |         ^
+2026-10-10T06:27:54.0034340Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0034850Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0035200Z        |          ^
+2026-10-10T06:27:54.0035760Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:83340:23: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0036450Z  83340 |           int nCopy = MIN(nOut, nIn);
+2026-10-10T06:27:54.0036760Z        |                       ^
+2026-10-10T06:27:54.0037470Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0038220Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0038480Z       |         ^
+2026-10-10T06:27:54.0038960Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0039480Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0039770Z        |          ^
+2026-10-10T06:27:54.0040600Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:83374:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0041550Z  83374 |           nOut = MIN(pBt->usableSize - 4, nRem);
+2026-10-10T06:27:54.0041830Z        |                  ^
+2026-10-10T06:27:54.0042530Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0043240Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0043480Z       |         ^
+2026-10-10T06:27:54.0043990Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0044770Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0045040Z        |          ^
+2026-10-10T06:27:54.0045630Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:85420:21: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0046280Z  85420 |   const int nCopy = MIN(nSrcPgsz, nDestPgsz);
+2026-10-10T06:27:54.0046670Z        |                     ^
+2026-10-10T06:27:54.0047630Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0048340Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0048630Z       |         ^
+2026-10-10T06:27:54.0049080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0049660Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0049960Z        |          ^
+2026-10-10T06:27:54.0050570Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:85739:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0051350Z  85739 |           iEnd = MIN(PENDING_BYTE + pgszDest, iSize);
+2026-10-10T06:27:54.0051640Z        |                  ^
+2026-10-10T06:27:54.0052340Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0053020Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0053340Z       |         ^
+2026-10-10T06:27:54.0053820Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0054410Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0054680Z        |          ^
+2026-10-10T06:27:54.0055540Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:87349:49: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0056250Z  87349 |     if( sqlite3VdbeMemClearAndResize(pMem, (int)MAX(nAlloc,32)) ){
+2026-10-10T06:27:54.0056620Z        |                                                 ^
+2026-10-10T06:27:54.0057340Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0057990Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0058280Z       |         ^
+2026-10-10T06:27:54.0058740Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0062210Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0062980Z        |          ^
+2026-10-10T06:27:54.0064470Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:87431:49: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0066260Z  87431 |     if( sqlite3VdbeMemClearAndResize(pMem, (int)MAX(nAlloc,32)) ){
+2026-10-10T06:27:54.0067080Z        |                                                 ^
+2026-10-10T06:27:54.0068810Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0071680Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0072280Z       |         ^
+2026-10-10T06:27:54.0073520Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0074890Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0075740Z        |          ^
+2026-10-10T06:27:54.0077100Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:93135:22: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0080010Z  93135 |           int nCmp = MIN(mem1.n, pRhs->n);
+2026-10-10T06:27:54.0080720Z        |                      ^
+2026-10-10T06:27:54.0082460Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0084360Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0084930Z       |         ^
+2026-10-10T06:27:54.0086030Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0087370Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0088070Z        |          ^
+2026-10-10T06:27:54.0089410Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:93163:22: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0091220Z  93163 |           int nCmp = MIN(nStr, pRhs->n);
+2026-10-10T06:27:54.0091910Z        |                      ^
+2026-10-10T06:27:54.0093550Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0095400Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0096030Z       |         ^
+2026-10-10T06:27:54.0097210Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0098660Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0099420Z        |          ^
+2026-10-10T06:27:54.0100830Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:93371:12: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0102380Z  93371 |     nCmp = MIN( pPKey2->n, nStr );
+2026-10-10T06:27:54.0103160Z        |            ^
+2026-10-10T06:27:54.0104850Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0106690Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0107430Z       |         ^
+2026-10-10T06:27:54.0108710Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0110160Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0110830Z        |          ^
+2026-10-10T06:27:54.0112270Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:93830:16: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0114020Z  93830 |   for(ii=0; ii<MIN(pIdx->nColumn, BMS); ii++){
+2026-10-10T06:27:54.0114770Z        |                ^
+2026-10-10T06:27:54.0116360Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0118430Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0119190Z       |         ^
+2026-10-10T06:27:54.0120840Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0121650Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0122430Z        |          ^
+2026-10-10T06:27:54.0123080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:96846:19: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0123720Z  96846 |       nextIndex = MAX(idx + 1, nextIndex);
+2026-10-10T06:27:54.0124120Z        |                   ^
+2026-10-10T06:27:54.0124820Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0125530Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0126040Z       |         ^
+2026-10-10T06:27:54.0126580Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0127250Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0127590Z        |          ^
+2026-10-10T06:27:54.0128150Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:107470:28: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0128940Z  107470 |       sqlite3_int64 nNew = MAX(128, 2*(sqlite3_int64)p->nAlloc);
+2026-10-10T06:27:54.0129250Z         |                            ^
+2026-10-10T06:27:54.0129860Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0130540Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0130920Z       |         ^
+2026-10-10T06:27:54.0131350Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0131930Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0132270Z        |          ^
+2026-10-10T06:27:54.0132800Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:107751:25: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0133540Z  107751 |   res = memcmp(v1, v2, (MIN(n1, n2) - 13)/2);
+2026-10-10T06:27:54.0133860Z         |                         ^
+2026-10-10T06:27:54.0134510Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0135180Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0135520Z       |         ^
+2026-10-10T06:27:54.0136020Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0136480Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0136790Z        |          ^
+2026-10-10T06:27:54.0137320Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:107947:17: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0138050Z  107947 |       mxCache = MIN(mxCache, SQLITE_MAX_PMASZ);
+2026-10-10T06:27:54.0138350Z         |                 ^
+2026-10-10T06:27:54.0139020Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0139730Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0140010Z       |         ^
+2026-10-10T06:27:54.0140520Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0141020Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0141320Z        |          ^
+2026-10-10T06:27:54.0141880Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:107948:28: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0142550Z  107948 |       pSorter->mxPmaSize = MAX(pSorter->mnPmaSize, (int)mxCache);
+2026-10-10T06:27:54.0143210Z         |                            ^
+2026-10-10T06:27:54.0143930Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0144610Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0144880Z       |         ^
+2026-10-10T06:27:54.0145400Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0145910Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0146150Z        |          ^
+2026-10-10T06:27:54.0146880Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:108960:19: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0147550Z  108960 |     pIncr->mxSz = MAX(pTask->pSorter->mxKeysize+9,pTask->pSorter->mxPmaSize/2);
+2026-10-10T06:27:54.0147920Z         |                   ^
+2026-10-10T06:27:54.0148610Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0149300Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0149510Z       |         ^
+2026-10-10T06:27:54.0149910Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0150380Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0150600Z        |          ^
+2026-10-10T06:27:54.0151080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:109414:21: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0151810Z  109414 |           nReader = MIN(pTask->nPMA - i, SORTER_MAX_MERGE_COUNT);
+2026-10-10T06:27:54.0152110Z         |                     ^
+2026-10-10T06:27:54.0152670Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0153290Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0153610Z       |         ^
+2026-10-10T06:27:54.0154110Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0154580Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0154940Z        |          ^
+2026-10-10T06:27:54.0155490Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:110291:17: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0156370Z  110291 |     int nCopy = MIN(nRead, (p->nChunkSize - iChunkOffset));
+2026-10-10T06:27:54.0156730Z         |                 ^
+2026-10-10T06:27:54.0157300Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0158060Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0218290Z       |         ^
+2026-10-10T06:27:54.0218910Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0219440Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0219740Z        |          ^
+2026-10-10T06:27:54.0220330Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:110398:22: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0221050Z  110398 |         int iSpace = MIN(nWrite, p->nChunkSize - iChunkOffset);
+2026-10-10T06:27:54.0221330Z         |                      ^
+2026-10-10T06:27:54.0221960Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0223390Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0223690Z       |         ^
+2026-10-10T06:27:54.0224230Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0224740Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0224940Z        |          ^
+2026-10-10T06:27:54.0225500Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:110612:10: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0226200Z  110612 |   return MAX(pVfs->szOsFile, (int)sizeof(MemJournal));
+2026-10-10T06:27:54.0226830Z         |          ^
+2026-10-10T06:27:54.0227420Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0228050Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0228250Z       |         ^
+2026-10-10T06:27:54.0228630Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0229090Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0229280Z        |          ^
+2026-10-10T06:27:54.0229760Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:130551:18: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0230330Z  130551 |   pParse->nTab = MAX(pParse->nTab, iTab);
+2026-10-10T06:27:54.0230550Z         |                  ^
+2026-10-10T06:27:54.0231120Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0231720Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0231910Z       |         ^
+2026-10-10T06:27:54.0232400Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0232860Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0233060Z        |          ^
+2026-10-10T06:27:54.0233560Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:137012:15: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0234130Z  137012 |   int nCopy = MIN(ArraySize(aVal), pIdx->nKeyCol);
+2026-10-10T06:27:54.0234380Z         |               ^
+2026-10-10T06:27:54.0234950Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0235550Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0235750Z       |         ^
+2026-10-10T06:27:54.0236140Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0236590Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0236790Z        |          ^
+2026-10-10T06:27:54.0237290Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:171880:19: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0237890Z  171880 |       nExtraReg = MAX(nExtraReg, pLoop->u.btree.nBtm);
+2026-10-10T06:27:54.0238150Z         |                   ^
+2026-10-10T06:27:54.0238720Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0239340Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0239530Z       |         ^
+2026-10-10T06:27:54.0239960Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0240500Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0240740Z        |          ^
+2026-10-10T06:27:54.0241730Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:171887:19: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0242390Z  171887 |       nExtraReg = MAX(nExtraReg, pLoop->u.btree.nTop);
+2026-10-10T06:27:54.0242740Z         |                   ^
+2026-10-10T06:27:54.0243390Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0244050Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0244270Z       |         ^
+2026-10-10T06:27:54.0244880Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0246970Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0247180Z        |          ^
+2026-10-10T06:27:54.0247700Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:175988:14: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0248730Z  175988 |   mxBitCol = MIN(BMS-1,pTable->nCol);
+2026-10-10T06:27:54.0249040Z         |              ^
+2026-10-10T06:27:54.0249660Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0250260Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0250460Z       |         ^
+2026-10-10T06:27:54.0250860Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0251330Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0251530Z        |          ^
+2026-10-10T06:27:54.0252010Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:177602:25: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0252600Z  177602 |       pTemplate->rRun = MIN(p->rRun, pTemplate->rRun);
+2026-10-10T06:27:54.0252860Z         |                         ^
+2026-10-10T06:27:54.0253430Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0254040Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0254250Z       |         ^
+2026-10-10T06:27:54.0254640Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0255100Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0255290Z        |          ^
+2026-10-10T06:27:54.0255780Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:177603:25: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0256380Z  177603 |       pTemplate->nOut = MIN(p->nOut - 1, pTemplate->nOut);
+2026-10-10T06:27:54.0256660Z         |                         ^
+2026-10-10T06:27:54.0257250Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0257850Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0258100Z       |         ^
+2026-10-10T06:27:54.0258540Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0259000Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0259190Z        |          ^
+2026-10-10T06:27:54.0259680Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:177611:25: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0260320Z  177611 |       pTemplate->rRun = MAX(p->rRun, pTemplate->rRun);
+2026-10-10T06:27:54.0260590Z         |                         ^
+2026-10-10T06:27:54.0261530Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0262140Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0262330Z       |         ^
+2026-10-10T06:27:54.0262720Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0263200Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0263400Z        |          ^
+2026-10-10T06:27:54.0264060Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:177612:25: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0264670Z  177612 |       pTemplate->nOut = MAX(p->nOut + 1, pTemplate->nOut);
+2026-10-10T06:27:54.0264930Z         |                         ^
+2026-10-10T06:27:54.0265510Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0266110Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0266330Z       |         ^
+2026-10-10T06:27:54.0266750Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0267270Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0267510Z        |          ^
+2026-10-10T06:27:54.0268010Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:178042:10: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0268630Z  178042 |   nCmp = MIN(nCmp, (pIdx->nColumn - nEq));
+2026-10-10T06:27:54.0268860Z         |          ^
+2026-10-10T06:27:54.0269450Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0270110Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0270310Z       |         ^
+2026-10-10T06:27:54.0270720Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0271260Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0271480Z        |          ^
+2026-10-10T06:27:54.0271990Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:180808:19: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0272670Z  180808 |   aFrom[0].nRow = MIN(pParse->nQueryLoop, 48);  assert( 48==sqlite3LogEst(28) );
+2026-10-10T06:27:54.0273020Z         |                   ^
+2026-10-10T06:27:54.0273630Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0274310Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0274750Z       |         ^
+2026-10-10T06:27:54.0275150Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0275620Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0275860Z        |          ^
+2026-10-10T06:27:54.0276380Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:184781:12: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0276990Z  184781 |     nArg = MAX(nArg, windowArgCount(pWin));
+2026-10-10T06:27:54.0277220Z         |            ^
+2026-10-10T06:27:54.0277820Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0278440Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0278630Z       |         ^
+2026-10-10T06:27:54.0279350Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0279830Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0280040Z        |          ^
+2026-10-10T06:27:54.0280540Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:251138:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0281170Z  251138 |   nToken = (int)(MIN( MAX(sqlite3_value_int64(apVal[4]), 0), 64));
+2026-10-10T06:27:54.0281480Z         |                  ^
+2026-10-10T06:27:54.0282450Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0283160Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0283380Z       |         ^
+2026-10-10T06:27:54.0283830Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0284340Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0284560Z        |          ^
+2026-10-10T06:27:54.0285050Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:251138:23: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0285710Z  251138 |   nToken = (int)(MIN( MAX(sqlite3_value_int64(apVal[4]), 0), 64));
+2026-10-10T06:27:54.0285990Z         |                       ^
+2026-10-10T06:27:54.0286690Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0287300Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0287500Z       |         ^
+2026-10-10T06:27:54.0287890Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0288350Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0288550Z        |          ^
+2026-10-10T06:27:54.0289040Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:255338:18: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0289680Z  255338 |     p->iHeight = MAX(p->iHeight, p->apChild[ii]->iHeight + 1);
+2026-10-10T06:27:54.0290160Z         |                  ^
+2026-10-10T06:27:54.0290990Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0291660Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0291880Z       |         ^
+2026-10-10T06:27:54.0292380Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0292860Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0293080Z        |          ^
+2026-10-10T06:27:54.0293600Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:256748:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0294240Z  256748 |       int nMin = MIN(p1->nKey, p2->nKey);
+2026-10-10T06:27:54.0294510Z         |                  ^
+2026-10-10T06:27:54.0295110Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0295750Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0295960Z       |         ^
+2026-10-10T06:27:54.0296370Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0296850Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0297060Z        |          ^
+2026-10-10T06:27:54.0297560Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:257732:10: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0298470Z  257732 |   nCmp = MIN(pLeft->n, pRight->n);
+2026-10-10T06:27:54.0298670Z         |          ^
+2026-10-10T06:27:54.0299250Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0299850Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0300050Z       |         ^
+2026-10-10T06:27:54.0300640Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0301840Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0302080Z        |          ^
+2026-10-10T06:27:54.0303280Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:258121:27: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0303950Z  258121 |             nOriginCntr = MAX(nOriginCntr, pSeg->iOrigin2);
+2026-10-10T06:27:54.0304220Z         |                           ^
+2026-10-10T06:27:54.0304820Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0305440Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0305640Z       |         ^
+2026-10-10T06:27:54.0306050Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0306640Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0306870Z        |          ^
+2026-10-10T06:27:54.0307690Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:258812:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0308600Z  258812 |       int iEod = MIN(pIter->iEndofDoclist, pIter->pLeaf->szLeaf);
+2026-10-10T06:27:54.0309220Z         |                  ^
+2026-10-10T06:27:54.0309920Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0310670Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0310940Z       |         ^
+2026-10-10T06:27:54.0311410Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0312000Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0312210Z        |          ^
+2026-10-10T06:27:54.0312860Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:259517:19: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0313640Z  259517 |       nCmp = (u32)MIN(nNew, nTerm-nMatch);
+2026-10-10T06:27:54.0314440Z         |                   ^
+2026-10-10T06:27:54.0316930Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0317780Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0318060Z       |         ^
+2026-10-10T06:27:54.0318580Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0319140Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0319390Z        |          ^
+2026-10-10T06:27:54.0319990Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:260525:16: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0320840Z  260525 |   int nChunk = MIN(nRem, pSeg->pLeaf->szLeaf - pSeg->iLeafOffset);
+2026-10-10T06:27:54.0321230Z         |                ^
+2026-10-10T06:27:54.0321990Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0323760Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0324030Z       |         ^
+2026-10-10T06:27:54.0324500Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0325070Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0325330Z        |          ^
+2026-10-10T06:27:54.0326240Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:260550:16: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0327170Z  260550 |       nChunk = MIN(nRem, pData->szLeaf - 4);
+2026-10-10T06:27:54.0327460Z         |                ^
+2026-10-10T06:27:54.0328130Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0328890Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0329130Z       |         ^
+2026-10-10T06:27:54.0329780Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0330340Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0330580Z        |          ^
+2026-10-10T06:27:54.0331220Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:260897:14: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0332110Z  260897 |       nSeg = MIN(pStruct->aLevel[iLevel].nSeg, nSegment);
+2026-10-10T06:27:54.0332460Z         |              ^
+2026-10-10T06:27:54.0333180Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0333880Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0334110Z       |         ^
+2026-10-10T06:27:54.0334570Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0335090Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0335300Z        |          ^
+2026-10-10T06:27:54.0335940Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:261403:14: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0336550Z  261403 |   int nMin = MIN(pPage->term.n, nTerm);
+2026-10-10T06:27:54.0336780Z         |              ^
+2026-10-10T06:27:54.0337370Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0338050Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0338300Z       |         ^
+2026-10-10T06:27:54.0348760Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0349370Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0349620Z        |          ^
+2026-10-10T06:27:54.0350190Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:262360:17: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0350860Z  262360 |       nPrefix = MIN(nPrefix, nPrefix2);
+2026-10-10T06:27:54.0351130Z         |                 ^
+2026-10-10T06:27:54.0351810Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0352500Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0352760Z       |         ^
+2026-10-10T06:27:54.0353200Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0354360Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0354560Z        |          ^
+2026-10-10T06:27:54.0355040Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:262806:20: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0355680Z  262806 |     pNew->nLevel = MIN(pStruct->nLevel+1, FTS5_MAX_LEVEL);
+2026-10-10T06:27:54.0355950Z         |                    ^
+2026-10-10T06:27:54.0356540Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0357500Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0357840Z       |         ^
+2026-10-10T06:27:54.0358390Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0359370Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0359640Z        |          ^
+2026-10-10T06:27:54.0360200Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:263471:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0360810Z  263471 |         int n1 = MIN(nHalf, pT->nMap-i1);
+2026-10-10T06:27:54.0361070Z         |                  ^
+2026-10-10T06:27:54.0361740Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0362430Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0362650Z       |         ^
+2026-10-10T06:27:54.0363140Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0363790Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0364000Z        |          ^
+2026-10-10T06:27:54.0364600Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:263472:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0365230Z  263472 |         int n2 = MIN(nHalf, pT->nMap-i1-n1);
+2026-10-10T06:27:54.0365510Z         |                  ^
+2026-10-10T06:27:54.0366160Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0366920Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0368330Z       |         ^
+2026-10-10T06:27:54.0368840Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0369390Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0369720Z        |          ^
+2026-10-10T06:27:54.0370310Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:264925:22: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0371100Z  264925 |   int nSlotPerPage = MAX(MINSLOT, (p->pConfig->pgsz - 8) / szKey);
+2026-10-10T06:27:54.0371550Z         |                      ^
+2026-10-10T06:27:54.0372260Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0373010Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0373280Z       |         ^
+2026-10-10T06:27:54.0373730Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0374270Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0374500Z        |          ^
+2026-10-10T06:27:54.0375080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:264958:15: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0375820Z  264958 |       nSlot = MAX((i64)nElem*4, MINSLOT);
+2026-10-10T06:27:54.0376460Z         |               ^
+2026-10-10T06:27:54.0377120Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0377890Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0378140Z       |         ^
+2026-10-10T06:27:54.0378600Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0379140Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0379350Z        |          ^
+2026-10-10T06:27:54.0380450Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:265479:55: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0381210Z  265479 |           res = fts5Memcmp(&pLeaf->p[iOff], zIdxTerm, MIN(nTerm, nIdxTerm));
+2026-10-10T06:27:54.0381570Z         |                                                       ^
+2026-10-10T06:27:54.0394720Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0395350Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0395560Z       |         ^
+2026-10-10T06:27:54.0395950Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0396420Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0396610Z        |          ^
+2026-10-10T06:27:54.0397110Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:267017:31: warning: ambiguous expansion of macro 'MAX' [-Wambiguous-macro]
+2026-10-10T06:27:54.0397680Z  267017 |     pIdxInfo->estimatedRows = MAX(1, nRow);
+2026-10-10T06:27:54.0398080Z         |                               ^
+2026-10-10T06:27:54.0398710Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:218:9: note: expanding this definition of 'MAX'
+2026-10-10T06:27:54.0399440Z   218 | #define MAX(a, b) (((a)>(b))?(a):(b))
+2026-10-10T06:27:54.0399660Z       |         ^
+2026-10-10T06:27:54.0400080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15918:10: note: other definition of 'MAX'
+2026-10-10T06:27:54.0400570Z  15918 | # define MAX(A,B) ((A)>(B)?(A):(B))
+2026-10-10T06:27:54.0400770Z        |          ^
+2026-10-10T06:27:54.0401260Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:274998:18: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0401850Z  274998 |       int nCmp = MIN(nTerm, pCsr->nLeTerm);
+2026-10-10T06:27:54.0402090Z         |                  ^
+2026-10-10T06:27:54.0402750Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0403510Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0403780Z       |         ^
+2026-10-10T06:27:54.0404220Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0404680Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0404880Z        |          ^
+2026-10-10T06:27:54.0405360Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:275072:20: warning: ambiguous expansion of macro 'MIN' [-Wambiguous-macro]
+2026-10-10T06:27:54.0405950Z  275072 |         int nCmp = MIN(nTerm, pCsr->nLeTerm);
+2026-10-10T06:27:54.0406200Z         |                    ^
+2026-10-10T06:27:54.0406880Z /Applications/Xcode_16.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.2.sdk/usr/include/sys/param.h:215:9: note: expanding this definition of 'MIN'
+2026-10-10T06:27:54.0407870Z   215 | #define MIN(a, b) (((a)<(b))?(a):(b))
+2026-10-10T06:27:54.0408070Z       |         ^
+2026-10-10T06:27:54.0408450Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/CSQLCipher/sqlite3.c:15915:10: note: other definition of 'MIN'
+2026-10-10T06:27:54.0408900Z  15915 | # define MIN(A,B) ((A)<(B)?(A):(B))
+2026-10-10T06:27:54.0409090Z        |          ^
+2026-10-10T06:27:54.0409230Z 60 warnings generated.
+2026-10-10T06:27:54.0409410Z [5/8] Compiling CSQLCipher sqlite3.c
+2026-10-10T06:27:58.1525800Z [7/16] Emitting module AegisStore
+2026-10-10T06:28:01.3800380Z [8/19] Compiling AegisStore DatabaseKeyManager.swift
+2026-10-10T06:28:01.3915100Z [9/19] Compiling AegisStore InMemoryStore.swift
+2026-10-10T06:28:01.4016280Z [10/19] Compiling AegisStore Models.swift
+2026-10-10T06:28:01.4117240Z [11/19] Compiling AegisStore Repositories.swift
+2026-10-10T06:28:01.4193920Z [12/19] Compiling AegisStore SQLCipherStore.swift
+2026-10-10T06:28:01.4194470Z [13/19] Compiling AegisStore Snapshot.swift
+2026-10-10T06:28:01.4195020Z [14/19] Compiling AegisStore StoreSchema.swift
+2026-10-10T06:28:01.4195570Z [15/19] Compiling AegisStore SQLCipherConnection.swift
+2026-10-10T06:28:01.4197110Z [16/19] Compiling AegisStore SQLCipherRepositories1.swift
+2026-10-10T06:28:01.4212690Z [17/19] Compiling AegisStore SQLCipherRepositories2.swift
+2026-10-10T06:28:08.8326260Z [18/22] Emitting module AegisStoreTests
+2026-10-10T06:28:09.9704040Z [19/22] Compiling AegisStoreTests AegisStoreTests.swift
+2026-10-10T06:28:09.9704540Z [20/22] Compiling AegisStoreTests SQLCipherStoreTests.swift
+2026-10-10T06:28:11.3340480Z [21/24] Emitting module AegisStorePackageTests
+2026-10-10T06:28:11.3341490Z [22/24] Compiling AegisStorePackageTests runner.swift
+2026-10-10T06:28:11.3381200Z [22/24] Write Objects.LinkFileList
+2026-10-10T06:28:12.0720300Z [23/24] Linking AegisStorePackageTests
+2026-10-10T06:28:12.0750020Z Build complete! (23.25s)
+2026-10-10T06:28:12.5577770Z Test Suite 'All tests' started at 2026-10-10 06:28:12.300.
+2026-10-10T06:28:12.5578730Z Test Suite 'AegisStorePackageTests.xctest' started at 2026-10-10 06:28:12.302.
+2026-10-10T06:28:12.5579280Z Test Suite 'AegisStoreTests' started at 2026-10-10 06:28:12.302.
+2026-10-10T06:28:12.5579870Z Test Case '-[AegisStoreTests.AegisStoreTests testAttachmentProgressAndCompletion]' started.
+2026-10-10T06:28:12.5580620Z Test Case '-[AegisStoreTests.AegisStoreTests testAttachmentProgressAndCompletion]' passed (0.003 seconds).
+2026-10-10T06:28:12.5581310Z Test Case '-[AegisStoreTests.AegisStoreTests testBlockIsSilentAndLocal]' started.
+2026-10-10T06:28:12.5581940Z Test Case '-[AegisStoreTests.AegisStoreTests testBlockIsSilentAndLocal]' passed (0.001 seconds).
+2026-10-10T06:28:12.5582560Z Test Case '-[AegisStoreTests.AegisStoreTests testCallRecordAndRecordingConsent]' started.
+2026-10-10T06:28:12.5583270Z Test Case '-[AegisStoreTests.AegisStoreTests testCallRecordAndRecordingConsent]' passed (0.000 seconds).
+2026-10-10T06:28:12.5584720Z Test Case '-[AegisStoreTests.AegisStoreTests testContactVerificationLifecycle]' started.
+2026-10-10T06:28:12.5585450Z Test Case '-[AegisStoreTests.AegisStoreTests testContactVerificationLifecycle]' passed (0.001 seconds).
+2026-10-10T06:28:12.5586160Z Test Case '-[AegisStoreTests.AegisStoreTests testConversationsContainingUser]' started.
+2026-10-10T06:28:12.5586790Z Test Case '-[AegisStoreTests.AegisStoreTests testConversationsContainingUser]' passed (0.000 seconds).
+2026-10-10T06:28:12.5587460Z Test Case '-[AegisStoreTests.AegisStoreTests testCreateAndFetchConversation]' started.
+2026-10-10T06:28:12.5588090Z Test Case '-[AegisStoreTests.AegisStoreTests testCreateAndFetchConversation]' passed (0.000 seconds).
+2026-10-10T06:28:12.5588920Z Test Case '-[AegisStoreTests.AegisStoreTests testCreateDuplicateConversationConflicts]' started.
+2026-10-10T06:28:12.5589740Z Test Case '-[AegisStoreTests.AegisStoreTests testCreateDuplicateConversationConflicts]' passed (0.000 seconds).
+2026-10-10T06:28:12.5590450Z Test Case '-[AegisStoreTests.AegisStoreTests testDeleteConversationCascades]' started.
+2026-10-10T06:28:12.5591790Z Test Case '-[AegisStoreTests.AegisStoreTests testDeleteConversationCascades]' passed (0.000 seconds).
+2026-10-10T06:28:12.5592400Z Test Case '-[AegisStoreTests.AegisStoreTests testDeliveryStateTransitions]' started.
+2026-10-10T06:28:12.5593060Z Test Case '-[AegisStoreTests.AegisStoreTests testDeliveryStateTransitions]' passed (0.000 seconds).
+2026-10-10T06:28:12.5593670Z Test Case '-[AegisStoreTests.AegisStoreTests testExpungeDisappearedWipesExpired]' started.
+2026-10-10T06:28:12.5594350Z Test Case '-[AegisStoreTests.AegisStoreTests testExpungeDisappearedWipesExpired]' passed (0.000 seconds).
+2026-10-10T06:28:12.5601740Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertAndPaginateMessages]' started.
+2026-10-10T06:28:12.5602420Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertAndPaginateMessages]' passed (0.000 seconds).
+2026-10-10T06:28:12.5603030Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertDuplicateMessageConflicts]' started.
+2026-10-10T06:28:12.5603640Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertDuplicateMessageConflicts]' passed (0.000 seconds).
+2026-10-10T06:28:12.5604300Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertEmptyTextMessageRejected]' started.
+2026-10-10T06:28:12.5604890Z Test Case '-[AegisStoreTests.AegisStoreTests testInsertEmptyTextMessageRejected]' passed (0.000 seconds).
+2026-10-10T06:28:12.5605530Z Test Case '-[AegisStoreTests.AegisStoreTests testListFiltersArchivedAndQuery]' started.
+2026-10-10T06:28:12.5606600Z Test Case '-[AegisStoreTests.AegisStoreTests testListFiltersArchivedAndQuery]' passed (0.000 seconds).
+2026-10-10T06:28:12.5607500Z Test Case '-[AegisStoreTests.AegisStoreTests testListSortsPinnedFirstThenRecency]' started.
+2026-10-10T06:28:12.5608660Z Test Case '-[AegisStoreTests.AegisStoreTests testListSortsPinnedFirstThenRecency]' passed (0.000 seconds).
+2026-10-10T06:28:12.5609230Z Test Case '-[AegisStoreTests.AegisStoreTests testMarkReadClearsUnread]' started.
+2026-10-10T06:28:12.5610310Z Test Case '-[AegisStoreTests.AegisStoreTests testMarkReadClearsUnread]' passed (0.000 seconds).
+2026-10-10T06:28:12.5611260Z Test Case '-[AegisStoreTests.AegisStoreTests testMembershipRoles]' started.
+2026-10-10T06:28:12.5612410Z Test Case '-[AegisStoreTests.AegisStoreTests testMembershipRoles]' passed (0.000 seconds).
+2026-10-10T06:28:12.5613930Z Test Case '-[AegisStoreTests.AegisStoreTests testOutboxQueuesAndGatesScheduled]' started.
+2026-10-10T06:28:12.5614510Z Test Case '-[AegisStoreTests.AegisStoreTests testOutboxQueuesAndGatesScheduled]' passed (0.000 seconds).
+2026-10-10T06:28:12.5615120Z Test Case '-[AegisStoreTests.AegisStoreTests testReactionsAddAndRemove]' started.
+2026-10-10T06:28:12.5615660Z Test Case '-[AegisStoreTests.AegisStoreTests testReactionsAddAndRemove]' passed (0.000 seconds).
+2026-10-10T06:28:12.5616420Z Test Case '-[AegisStoreTests.AegisStoreTests testSearchFindsTextExcludesTombstones]' started.
+2026-10-10T06:28:12.5617020Z Test Case '-[AegisStoreTests.AegisStoreTests testSearchFindsTextExcludesTombstones]' passed (0.000 seconds).
+2026-10-10T06:28:12.5617720Z Test Case '-[AegisStoreTests.AegisStoreTests testSearchFindsVoiceNoteTranscriptions]' started.
+2026-10-10T06:28:12.5618610Z Test Case '-[AegisStoreTests.AegisStoreTests testSearchFindsVoiceNoteTranscriptions]' passed (0.000 seconds).
+2026-10-10T06:28:12.5619270Z Test Case '-[AegisStoreTests.AegisStoreTests testTombstoneWipesContentPreservesPosition]' started.
+2026-10-10T06:28:12.5619970Z Test Case '-[AegisStoreTests.AegisStoreTests testTombstoneWipesContentPreservesPosition]' passed (0.000 seconds).
+2026-10-10T06:28:12.5620570Z Test Case '-[AegisStoreTests.AegisStoreTests testTransactionGroupsWrites]' started.
+2026-10-10T06:28:12.5621850Z Test Case '-[AegisStoreTests.AegisStoreTests testTransactionGroupsWrites]' passed (0.001 seconds).
+2026-10-10T06:28:12.5623180Z Test Case '-[AegisStoreTests.AegisStoreTests testVaultChatCannotLeaveLocalOnly]' started.
+2026-10-10T06:28:12.5624400Z Test Case '-[AegisStoreTests.AegisStoreTests testVaultChatCannotLeaveLocalOnly]' passed (0.000 seconds).
+2026-10-10T06:28:12.5625080Z Test Suite 'AegisStoreTests' passed at 2026-10-10 06:28:12.313.
+2026-10-10T06:28:12.5625530Z 	 Executed 24 tests, with 0 failures (0 unexpected) in 0.011 (0.011) seconds
+2026-10-10T06:28:12.5626020Z Test Suite 'SQLCipherStoreTests' started at 2026-10-10 06:28:12.313.
+2026-10-10T06:28:12.5626540Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testAttachmentProgressClampsAndCompletes]' started.
+2026-10-10T06:28:12.5627850Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/AegisStore/SQLCipherRepositories1.swift:302: error: -[AegisStoreTests.SQLCipherStoreTests testAttachmentProgressClampsAndCompletes] : failed: caught error: "invalidArgument("message has no content")"
+2026-10-10T06:28:12.5631170Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testAttachmentProgressClampsAndCompletes]' failed (0.070 seconds).
+2026-10-10T06:28:12.5631950Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCallRecordConsent]' started.
+2026-10-10T06:28:12.5632990Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCallRecordConsent]' passed (0.008 seconds).
+2026-10-10T06:28:12.5634120Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCipherVersionIsSQLCipher]' started.
+2026-10-10T06:28:12.5635090Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCipherVersionIsSQLCipher]' passed (0.004 seconds).
+2026-10-10T06:28:12.5636200Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testContactVerificationFlow]' started.
+2026-10-10T06:28:12.5636830Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testContactVerificationFlow]' passed (0.005 seconds).
+2026-10-10T06:28:12.5637500Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCreateDuplicateConversationConflicts]' started.
+2026-10-10T06:28:12.5638190Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testCreateDuplicateConversationConflicts]' passed (0.004 seconds).
+2026-10-10T06:28:12.5640180Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDataSurvivesCloseAndReopen]' started.
+2026-10-10T06:28:12.5641250Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDataSurvivesCloseAndReopen]' passed (0.006 seconds).
+2026-10-10T06:28:12.5641850Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDeleteConversationCascades]' started.
+2026-10-10T06:28:12.5642490Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDeleteConversationCascades]' passed (0.006 seconds).
+2026-10-10T06:28:12.5643640Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDeliveryStateTerminalGuard]' started.
+2026-10-10T06:28:12.5645180Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testDeliveryStateTerminalGuard]' passed (0.005 seconds).
+2026-10-10T06:28:12.5645840Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testExpungeRemovesRowsAndFTSEntries]' started.
+2026-10-10T06:28:12.5646480Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testExpungeRemovesRowsAndFTSEntries]' passed (0.005 seconds).
+2026-10-10T06:28:12.5647270Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testInsertDuplicateMessageConflicts]' started.
+2026-10-10T06:28:12.5648770Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testInsertDuplicateMessageConflicts]' passed (0.004 seconds).
+2026-10-10T06:28:12.5649670Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testInsertIntoMissingConversationIsInvalidArgument]' started.
+2026-10-10T06:28:12.5650440Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testInsertIntoMissingConversationIsInvalidArgument]' passed (0.004 seconds).
+2026-10-10T06:28:12.5651260Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testListSortsPinnedFirstThenRecency]' started.
+2026-10-10T06:28:12.5653120Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testListSortsPinnedFirstThenRecency]' passed (0.004 seconds).
+2026-10-10T06:28:12.5653730Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMarkReadZeroesUnread]' started.
+2026-10-10T06:28:12.5655280Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMarkReadZeroesUnread]' passed (0.004 seconds).
+2026-10-10T06:28:12.5655830Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMembershipRoles]' started.
+2026-10-10T06:28:12.5657580Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMembershipRoles]' passed (0.004 seconds).
+2026-10-10T06:28:12.5658120Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMessagePagination]' started.
+2026-10-10T06:28:12.5658730Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testMessagePagination]' passed (0.006 seconds).
+2026-10-10T06:28:12.5660660Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testNestedTransactionsFlatten]' started.
+2026-10-10T06:28:12.5661270Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testNestedTransactionsFlatten]' passed (0.004 seconds).
+2026-10-10T06:28:12.5663120Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testPendingOutboxOrdering]' started.
+2026-10-10T06:28:12.5664240Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Tests/AegisStoreTests/SQLCipherStoreTests.swift:256: error: -[AegisStoreTests.SQLCipherStoreTests testPendingOutboxOrdering] : XCTAssertEqual failed: ("[F736D7CA-E03D-467B-8F9E-4E6B15E98822]") is not equal to ("[]")
+2026-10-10T06:28:12.5666080Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Tests/AegisStoreTests/SQLCipherStoreTests.swift:263: error: -[AegisStoreTests.SQLCipherStoreTests testPendingOutboxOrdering] : XCTAssertTrue failed
+2026-10-10T06:28:12.5667060Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testPendingOutboxOrdering]' failed (0.007 seconds).
+2026-10-10T06:28:12.5667950Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testReactions]' started.
+2026-10-10T06:28:12.5669220Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testReactions]' passed (0.005 seconds).
+2026-10-10T06:28:12.5669790Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSearchExcludesExpired]' started.
+2026-10-10T06:28:12.5671090Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSearchExcludesExpired]' passed (0.004 seconds).
+2026-10-10T06:28:12.5671720Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSearchFindsTextAndTranscriptions]' started.
+2026-10-10T06:28:12.5673390Z /Users/runner/work/aegis/aegis/Packages/AegisStore/Sources/AegisStore/SQLCipherRepositories1.swift:302: error: -[AegisStoreTests.SQLCipherStoreTests testSearchFindsTextAndTranscriptions] : failed: caught error: "invalidArgument("message has no content")"
+2026-10-10T06:28:12.5674600Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSearchFindsTextAndTranscriptions]' failed (0.005 seconds).
+2026-10-10T06:28:12.5675430Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSnapshotRestoreRoundTrip]' started.
+2026-10-10T06:28:12.5676730Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testSnapshotRestoreRoundTrip]' passed (0.008 seconds).
+2026-10-10T06:28:12.5677380Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testTombstoneWipesContent]' started.
+2026-10-10T06:28:12.5678020Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testTombstoneWipesContent]' passed (0.005 seconds).
+2026-10-10T06:28:12.5678770Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testTransactionRollsBackOnError]' started.
+2026-10-10T06:28:12.5679470Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testTransactionRollsBackOnError]' passed (0.004 seconds).
+2026-10-10T06:28:12.5680140Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testVaultPolicyCannotChange]' started.
+2026-10-10T06:28:12.5680760Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testVaultPolicyCannotChange]' passed (0.004 seconds).
+2026-10-10T06:28:12.5681450Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testWrongKeyFailsClosed]' started.
+2026-10-10T06:28:12.5682120Z Test Case '-[AegisStoreTests.SQLCipherStoreTests testWrongKeyFailsClosed]' passed (0.006 seconds).
+2026-10-10T06:28:12.5702360Z Test Suite 'SQLCipherStoreTests' failed at 2026-10-10 06:28:12.505.
+2026-10-10T06:28:12.5702900Z 	 Executed 25 tests, with 4 failures (2 unexpected) in 0.191 (0.192) seconds
+2026-10-10T06:28:12.5703340Z Test Suite 'AegisStorePackageTests.xctest' failed at 2026-10-10 06:28:12.505.
+2026-10-10T06:28:12.5703820Z 	 Executed 49 tests, with 4 failures (2 unexpected) in 0.201 (0.203) seconds
+2026-10-10T06:28:12.5704450Z Test Suite 'All tests' failed at 2026-10-10 06:28:12.505.
+2026-10-10T06:28:12.5704880Z 	 Executed 49 tests, with 4 failures (2 unexpected) in 0.201 (0.205) seconds
+2026-10-10T06:28:12.5706060Z ◇ Test run started.
+2026-10-10T06:28:12.5706440Z ↳ Testing Library Version: 102 (arm64e-apple-macos13.0)
+2026-10-10T06:28:12.5706840Z ✔ Test run with 0 tests passed after 0.001 seconds.
+2026-10-10T06:28:12.5720070Z ##[error]Process completed with exit code 1.
+2026-10-10T06:28:12.5793730Z ##[group]Run d=~/Library/Logs/DiagnosticReports
+2026-10-10T06:28:12.5794360Z [36;1md=~/Library/Logs/DiagnosticReports[0m
+2026-10-10T06:28:12.5794770Z [36;1mf=$(ls -t "$d"/AegisCryptoPackageTests*.ips 2>/dev/null | head -1)[0m
+2026-10-10T06:28:12.5795340Z [36;1mif [ -z "$f" ]; then f=$(ls -t "$d"/*.ips 2>/dev/null | head -1); fi[0m
+2026-10-10T06:28:12.5795780Z [36;1mif [ -n "$f" ]; then echo "=== $f ==="; python3 -c "[0m
+2026-10-10T06:28:12.5796160Z [36;1mimport json,sys[0m
+2026-10-10T06:28:12.5796490Z [36;1md=json.load(open('$f'))[0m
+2026-10-10T06:28:12.5796850Z [36;1mprint(d.get('exception',{}))[0m
+2026-10-10T06:28:12.5797210Z [36;1mprint(d.get('faultingThread',{}).get('frames','')[:0])[0m
+2026-10-10T06:28:12.5797550Z [36;1mfor fr in d.get('threads',[])[:1]:[0m
+2026-10-10T06:28:12.5797840Z [36;1m    pass[0m
+2026-10-10T06:28:12.5798100Z [36;1m# print crashed thread frames[0m
+2026-10-10T06:28:12.5798380Z [36;1mfor t in d.get('threads',[]):[0m
+2026-10-10T06:28:12.5798730Z [36;1m    if t.get('triggered'):[0m
+2026-10-10T06:28:12.5799020Z [36;1m        for fr in t['frames'][:25]:[0m
+2026-10-10T06:28:12.5799490Z [36;1m            print(fr.get('image','?')[-40:], hex(fr.get('imageOffset',0)), fr.get('symbol','?')[:80])[0m
+2026-10-10T06:28:12.5799900Z [36;1m        break[0m
+2026-10-10T06:28:12.5800220Z [36;1m"; else echo "no ips crash report found"; fi[0m
+2026-10-10T06:28:12.5871060Z shell: /bin/bash -e {0}
+2026-10-10T06:28:12.5871330Z env:
+2026-10-10T06:28:12.5871540Z   XCODE_APP: /Applications/Xcode_16.2.app
+2026-10-10T06:28:12.5871850Z ##[endgroup]
+2026-10-10T06:28:12.6483630Z no ips crash report found
+2026-10-10T06:28:12.6587190Z Post job cleanup.
+2026-10-10T06:28:12.9569820Z [command]/opt/homebrew/bin/git version
+2026-10-10T06:28:12.9749520Z git version 2.55.0
+2026-10-10T06:28:12.9773140Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/7d00e750-8816-458b-b557-1db2b2c4db42/.gitconfig'
+2026-10-10T06:28:12.9781380Z Temporarily overriding HOME='/Users/runner/work/_temp/7d00e750-8816-458b-b557-1db2b2c4db42' before making global git config changes
+2026-10-10T06:28:12.9782180Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-10T06:28:12.9786840Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/aegis/aegis
+2026-10-10T06:28:12.9883790Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-10T06:28:12.9936670Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-10T06:28:13.0801280Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-10T06:28:13.0871020Z http.https://github.com/.extraheader
+2026-10-10T06:28:13.0885150Z [command]/opt/homebrew/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-10T06:28:13.0948170Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-10T06:28:13.1756240Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-10T06:28:13.1817620Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-10T06:28:13.3153960Z Cleaning up orphan processes
+2026-10-10T06:28:13.9169060Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

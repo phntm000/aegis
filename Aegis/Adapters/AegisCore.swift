@@ -73,15 +73,6 @@ struct GroupInviteInfo: Codable, Sendable {
     var members: [String: String]
 }
 
-/// Call knock body (flagKnock frame, short TTL).
-struct KnockInfo: Codable, Sendable {
-    var v: Int = 1
-    var callID: String
-    var offer: CallOffer
-    /// "audio" | "video"
-    var mediaKind: String = "audio"
-}
-
 /// Chunk header for blob transfers: uploadID(16) || index u32 || count u32.
 struct BlobChunkHeader {
     static let size = 24
@@ -190,6 +181,10 @@ actor AegisCore {
         var contactID: UUID
         var peerFingerprint: Data
         var direction: CallDirection
+        /// DTLS fingerprints exchanged in signaling, for SAS computation.
+        /// Empty until the media stack (or signaling) provides them.
+        var localDTLSFingerprint: String = ""
+        var remoteDTLSFingerprint: String = ""
     }
 
     private var activeCalls: [UUID: ActiveCallContext] = [:]
@@ -900,7 +895,8 @@ actor AegisCore {
         try await sendRaw(inner.wire, mailbox: mailbox, ttl: 300, flags: AegisFrame.flagKnock)
         activeCalls[callID] = ActiveCallContext(
             callID: callID, conversationID: conversationID, contactID: contactID,
-            peerFingerprint: peer.fingerprint, direction: .outgoing
+            peerFingerprint: peer.fingerprint, direction: .outgoing,
+            localDTLSFingerprint: dtlsFingerprint
         )
         callStateCont.yield(CallStateEvent(callID: callID, state: .dialing))
         return callID
@@ -913,7 +909,8 @@ actor AegisCore {
         let contactID = await resolveContactID(for: peer.fingerprint) ?? UUID()
         activeCalls[callID] = ActiveCallContext(
             callID: callID, conversationID: conversationID, contactID: contactID,
-            peerFingerprint: peer.fingerprint, direction: .incoming
+            peerFingerprint: peer.fingerprint, direction: .incoming,
+            remoteDTLSFingerprint: knock.offer.dtlsFingerprint
         )
         incomingCallCont.yield(IncomingCall(
             id: callID,
@@ -953,8 +950,12 @@ actor AegisCore {
             // Already surfaced as incomingCallEvents via the knock path;
             // a repeated offer (LAN + relay duplicate) is deduped by the hub.
             _ = peer
-        } else if case .answer = signal {
-            callStateCont.yield(CallStateEvent(callID: callID, state: .connected))
+        } else if case .answer(let answer) = signal {
+            // The callee's DTLS fingerprint arrives with the answer: both
+            // sides now have what they need for the SAS.
+            activeCalls[callID]?.remoteDTLSFingerprint = answer.dtlsFingerprint
+            let sas = callSAS(for: callID)
+            callStateCont.yield(CallStateEvent(callID: callID, state: .connected, sas: sas))
         }
     }
 
@@ -1107,6 +1108,31 @@ actor AegisCore {
 
     func activeCallContext(_ callID: UUID) -> ActiveCallContext? {
         activeCalls[callID]
+    }
+
+    /// Records the local DTLS fingerprint once the media stack (or the
+    /// answer path) produces it. For the callee this is the moment both
+    /// fingerprints may be known, so the SAS is emitted if computable.
+    func noteLocalDTLSFingerprint(_ fingerprint: String, for callID: UUID) {
+        activeCalls[callID]?.localDTLSFingerprint = fingerprint
+        if let sas = callSAS(for: callID) {
+            // The callee's UI already shows .connecting (set when answering);
+            // re-yield it with the SAS attached rather than inventing a
+            // state transition.
+            callStateCont.yield(CallStateEvent(callID: callID, state: .connecting, sas: sas))
+        }
+    }
+
+    /// The ZRTP-style Short Authentication String for this call, or nil
+    /// when either DTLS fingerprint is missing. Both sides compute the same
+    /// value independently; the UI ceremony (read aloud, compare) binds the
+    /// *media* keys to the verified conversation.
+    private func callSAS(for callID: UUID) -> String? {
+        guard let context = activeCalls[callID] else { return nil }
+        return CallSAS.shortAuthString(
+            localHex: context.localDTLSFingerprint,
+            remoteHex: context.remoteDTLSFingerprint
+        )
     }
 
     func dropCall(_ callID: UUID) {

@@ -132,4 +132,13 @@ final class ActiveCallViewModel: ObservableObject {
         stopTicker()
         await appState.endActiveCall()
     }
+
+    /// Records the outcome of the SAS verification ceremony. "Match" marks
+    /// the call verified for its duration; "mismatch" surfaces a loud
+    /// warning — a SAS mismatch means someone may be relaying the media.
+    func confirmSAS(match: Bool) {
+        guard appState.activeCall?.callSAS != nil else { return }
+        appState.activeCall?.sasVerification = match ? .verified : .mismatch
+        Haptics.notification(match ? .success : .error)
+    }
 }

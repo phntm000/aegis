@@ -457,6 +457,9 @@ final class AppState: ObservableObject {
                 incomingCall = nil
             } else if activeCall?.id == event.callID {
                 activeCall?.state = event.state
+                if let sas = event.sas {
+                    activeCall?.callSAS = sas
+                }
                 if event.state == .connected, activeCall?.connectedAt == nil {
                     activeCall?.connectedAt = Date()
                 }

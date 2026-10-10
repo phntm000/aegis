@@ -20,7 +20,6 @@ manual review pass (see §8 for what the compiler still must confirm).
 │   │   ├── CryptoEngine.swift      # X3DH/ratchet/groups/sealed-sender/backup
 │   │   ├── LiveAdapters.swift      # CryptoService/TransportService/StoreService impls
 │   │   ├── StoreMapping.swift      # App models ↔ AegisStore models, sidecars
-│   │   ├── CallSignaling.swift     # CallSignal/CallOffer/CallAnswer/ICE wire types
 │   │   └── KeychainHelper.swift    # Keychain access (identity, wrapped keys)
 │   ├── Protocols/              # CryptoService, TransportService, StoreService
 │   ├── Core/AppState.swift     # Single consumer of all transport streams

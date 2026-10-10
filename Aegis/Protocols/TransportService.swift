@@ -68,6 +68,16 @@ struct RelayTestResult: Sendable, Hashable {
 struct CallStateEvent: Sendable, Hashable {
     let callID: UUID
     let state: ActiveCallState
+    /// ZRTP-style Short Authentication String for the call, computed from
+    /// both sides' DTLS fingerprints. Non-nil only once both fingerprints
+    /// are known; nil means no verification ceremony should be shown.
+    let sas: String?
+
+    init(callID: UUID, state: ActiveCallState, sas: String? = nil) {
+        self.callID = callID
+        self.state = state
+        self.sas = sas
+    }
 }
 
 /// A live group/channel membership change, translated by the transport
