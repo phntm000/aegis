@@ -109,4 +109,80 @@ final class SealedSenderTests: XCTestCase {
         // hash output, not a truncated key.
         XCTAssertNotEqual(bob.mailboxID, Data(bob.fingerprint.prefix(16)))
     }
+
+    // MARK: - Anonymous open (unknown-sender rendezvous)
+
+    func testOpenAnonymousRoundTrip() throws {
+        let (alice, bob) = try makeParties()
+        let inner = Data("prekey bytes".utf8)
+        let envelope = try SealedSender.seal(
+            innerMessage: inner, sender: alice,
+            recipientAgreementPublicKey: bob.agreementKey.publicKey,
+            recipientMailboxID: bob.mailboxID,
+            provider: testProvider
+        )
+        // No sender identity supplied: the certificate fingerprint is
+        // recovered, and the inner message is intact. The caller must still
+        // authenticate the fingerprint via the inner (X3DH) message.
+        let (fingerprint, recovered) = try SealedSender.openAnonymous(
+            envelope, recipient: bob, provider: testProvider
+        )
+        XCTAssertEqual(fingerprint, alice.fingerprint)
+        XCTAssertEqual(recovered, inner)
+    }
+
+    func testOpenAnonymousWrongRecipientFails() throws {
+        let (alice, bob) = try makeParties()
+        let carol = try Identity(provider: testProvider)
+        let envelope = try SealedSender.seal(
+            innerMessage: Data("x".utf8), sender: alice,
+            recipientAgreementPublicKey: bob.agreementKey.publicKey,
+            recipientMailboxID: bob.mailboxID,
+            provider: testProvider
+        )
+        XCTAssertThrowsError(
+            try SealedSender.openAnonymous(envelope, recipient: carol, provider: testProvider)
+        ) { error in
+            XCTAssertEqual(error as? AegisCryptoError, .authenticationFailed)
+        }
+    }
+
+    func testOpenAnonymousExpiredCertificateFails() throws {
+        let (alice, bob) = try makeParties()
+        let ancient = Date(timeIntervalSince1970: 1_000_000)
+        let envelope = try SealedSender.seal(
+            innerMessage: Data("x".utf8), sender: alice,
+            recipientAgreementPublicKey: bob.agreementKey.publicKey,
+            recipientMailboxID: bob.mailboxID,
+            now: ancient,
+            provider: testProvider
+        )
+        // Freshness is enforced even without a resolved sender identity.
+        XCTAssertThrowsError(
+            try SealedSender.openAnonymous(envelope, recipient: bob, provider: testProvider)
+        ) { error in
+            XCTAssertEqual(error as? AegisCryptoError, .certificateExpired)
+        }
+    }
+
+    func testOpenAnonymousTamperedCiphertextFails() throws {
+        let (alice, bob) = try makeParties()
+        let envelope = try SealedSender.seal(
+            innerMessage: Data("x".utf8), sender: alice,
+            recipientAgreementPublicKey: bob.agreementKey.publicKey,
+            recipientMailboxID: bob.mailboxID,
+            provider: testProvider
+        )
+        var badCTBytes = [UInt8](envelope.ciphertext)
+        badCTBytes[0] ^= 0x01
+        let tampered = SealedEnvelope(
+            mailboxID: envelope.mailboxID, ephemeralPublicKey: envelope.ephemeralPublicKey,
+            nonce: envelope.nonce, ciphertext: Data(badCTBytes), tag: envelope.tag
+        )
+        XCTAssertThrowsError(
+            try SealedSender.openAnonymous(tampered, recipient: bob, provider: testProvider)
+        ) { error in
+            XCTAssertEqual(error as? AegisCryptoError, .authenticationFailed)
+        }
+    }
 }

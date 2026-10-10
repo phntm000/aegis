@@ -282,6 +282,58 @@ public enum SealedSender {
         return OpenedEnvelope(senderFingerprint: cert.senderFingerprint, innerMessage: innerMessage)
     }
 
+    /// Opens a sealed envelope WITHOUT a pre-resolved sender identity.
+    ///
+    /// This is the rendezvous path: a prekey message arriving on our stable
+    /// identity route from a sender we have never met (first contact) or
+    /// whose identity changed (reinstall). The envelope is addressed only to
+    /// us, so the AEAD open needs no sender information.
+    ///
+    /// What IS enforced here: envelope authenticity (AEAD), certificate
+    /// freshness (replay bound). What is NOT verified here: the certificate
+    /// signature — that requires the sender's public identity, which the
+    /// caller does not have yet. The caller MUST authenticate the returned
+    /// `senderFingerprint` via the inner message before trusting it or
+    /// acting on it: for a prekey message, the X3DH exchange authenticates
+    /// `PreKeyMessage.senderIdentity`, and the caller must check
+    /// `senderIdentity.fingerprint == senderFingerprint` (constant-time)
+    /// after — and only after — the X3DH/AEAD decrypt succeeds. A forged
+    /// inner identity fails X3DH authentication; a mismatched certificate
+    /// fingerprint must be rejected.
+    ///
+    /// - Throws: `authenticationFailed` (wrong recipient or tampering),
+    ///   `certificateExpired` (replay outside the validity window).
+    public static func openAnonymous(
+        _ envelope: SealedEnvelope,
+        recipient: Identity,
+        now: Date = Date(),
+        provider: any CryptoProvider = CryptoKitProvider.shared
+    ) throws -> (senderFingerprint: Data, innerMessage: Data) {
+        let key = try sealedSenderKey(
+            privateKey: recipient.agreementKey.privateKey.toData(),
+            peerPublicKey: envelope.ephemeralPublicKey,
+            mailboxID: envelope.mailboxID,
+            provider: provider
+        )
+
+        let sealed = SealedMessage(nonce: envelope.nonce, ciphertext: envelope.ciphertext, tag: envelope.tag)
+        let padded = try AEAD.open(sealed, key: key, associatedData: envelope.aad, provider: provider)
+        let plaintext = try Padding.unpad(padded)
+
+        let (cert, _, innerMessage) = try SenderCertificate.parse(plaintext)
+
+        // Freshness: replay bound (no identity needed for this check).
+        let nowSeconds = now.timeIntervalSince1970
+        let certTime = TimeInterval(cert.timestamp)
+        guard certTime <= nowSeconds + maxClockSkew,
+              nowSeconds - certTime <= maxCertificateAge + maxClockSkew
+        else {
+            throw AegisCryptoError.certificateExpired
+        }
+
+        return (cert.senderFingerprint, innerMessage)
+    }
+
     // MARK: - Internal
 
     private static func sealedSenderKey(
