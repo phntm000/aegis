@@ -112,7 +112,7 @@ struct DeviceLinkView: View {
         } message: {
             Text(pairingError ?? "")
         }
-        .sheet(isPresented: $showingSecondaryPairing) {
+        .sheet(isPresented: showingSecondaryPairing) {
             if let words = scannedSAS {
                 SecondaryPairingView(words: words)
                     .environmentObject(appState)

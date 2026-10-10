@@ -244,9 +244,10 @@ actor DeviceLinkManager {
               primaryPub.count == 32
         else { throw DeviceLinkError.invalidQRPayload }
         let ephemeral = try provider.generateX25519KeyPair()
-        let secret = try ephemeral.withPrivateKeyBytes { priv in
-            try provider.x25519DH(privateKey: priv, peerPublicKey: primaryPub)
-        }
+        let secret = try provider.x25519DH(
+            privateKey: ephemeral.privateKey.toData(),
+            peerPublicKey: primaryPub
+        )
         let mailbox = Self.pairingMailbox(pairingID: pairingID)
         pairing = PairingAttempt(
             role: .secondary,
@@ -307,9 +308,10 @@ actor DeviceLinkManager {
                   let peerID = msg.deviceID
             else { return }
             do {
-                let secret = try attempt.ephemeral.withPrivateKeyBytes { priv in
-                    try provider.x25519DH(privateKey: priv, peerPublicKey: peerPub)
-                }
+                let secret = try provider.x25519DH(
+                    privateKey: attempt.ephemeral.privateKey.toData(),
+                    peerPublicKey: peerPub
+                )
                 attempt.peerEphemeralPublicKey = peerPub
                 attempt.peerDeviceID = peerID
                 attempt.peerDeviceName = msg.deviceName
