@@ -13,7 +13,7 @@
 
 import Foundation
 
-public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageRepository, ContactRepository, GroupMembershipRepository, AttachmentRepository, CallRecordRepository {
+public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageRepository, ContactRepository, GroupMembershipRepository, AttachmentRepository, CallRecordRepository, SessionRepository {
     // MARK: - Storage
 
     private var conversationsByID: [ConversationID: Conversation] = [:]
@@ -29,6 +29,8 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
     private var callsByID: [CallID: CallRecord] = [:]
     /// conversationID -> call IDs, newest-first
     private var callsByConversation: [ConversationID: [CallID]] = [:]
+    /// peer fingerprint hex -> opaque session snapshot
+    private var sessionsByFingerprint: [String: Data] = [:]
 
     public init() {}
 
@@ -40,6 +42,7 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
     public nonisolated var memberships: any GroupMembershipRepository { self }
     public nonisolated var attachments: any AttachmentRepository { self }
     public nonisolated var calls: any CallRecordRepository { self }
+    public nonisolated var sessions: any SessionRepository { self }
 
     public func transaction<T: Sendable>(
         _ work: @Sendable () async throws -> T
@@ -567,5 +570,29 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
         }
         r.recordingConsent[userID] = consented
         callsByID[callID] = r
+    }
+}
+
+// MARK: - SessionRepository
+
+extension InMemoryAegisStore {
+    public func save(fingerprint: String, snapshot: Data) async throws {
+        sessionsByFingerprint[fingerprint] = snapshot
+    }
+
+    public func load(fingerprint: String) async throws -> Data? {
+        sessionsByFingerprint[fingerprint]
+    }
+
+    public func loadAll() async throws -> [String: Data] {
+        sessionsByFingerprint
+    }
+
+    public func delete(fingerprint: String) async throws {
+        sessionsByFingerprint.removeValue(forKey: fingerprint)
+    }
+
+    public func deleteAll() async throws {
+        sessionsByFingerprint.removeAll()
     }
 }

@@ -88,10 +88,25 @@ protocol CryptoService: Sendable {
 
     // MARK: Encrypted backup
 
-    /// Export the identity + sessions + store snapshot as one encrypted blob.
+    /// Export the identity + store snapshot as one encrypted blob.
+    /// (Ratchet sessions are device-local: they persist in the encrypted
+    /// store across restarts but are excluded from backups, which
+    /// re-establish sessions via X3DH on restore.)
     func exportEncryptedBackup(passphrase: String) async throws -> Data
     /// Restore from an encrypted backup blob. Returns the restored identity.
     func importEncryptedBackup(_ data: Data, passphrase: String) async throws -> LocalIdentity
     /// Local strength estimate for the backup-passphrase UI meter.
     func backupPassphraseStrength(_ passphrase: String) -> PassphraseStrength
+
+    // MARK: Session durability
+
+    /// Persists dirty Double Ratchet session snapshots to the encrypted
+    /// store. Runs automatically (debounced) and on app backgrounding;
+    /// exposed so the app can force a flush at lifecycle boundaries.
+    func flushSessions() async
+}
+
+extension CryptoService {
+    /// Default: persistence not configured (previews/mocks).
+    func flushSessions() async {}
 }

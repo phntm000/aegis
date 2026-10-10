@@ -501,4 +501,68 @@ final class SQLCipherStoreTests: XCTestCase {
             XCTFail("expected .invalidArgument, got \(error)")
         }
     }
+
+    // MARK: - Ratchet sessions
+
+    func testSessionSaveLoadRoundTrip() async throws {
+        let fp = String(repeating: "ab", count: 32)
+        let blob = Data("opaque-snapshot-bytes".utf8)
+        try await store.sessions.save(fingerprint: fp, snapshot: blob)
+        XCTAssertEqual(try await store.sessions.load(fingerprint: fp), blob)
+        XCTAssertNil(try await store.sessions.load(fingerprint: String(repeating: "cd", count: 32)))
+    }
+
+    func testSessionSaveOverwrites() async throws {
+        let fp = String(repeating: "ab", count: 32)
+        try await store.sessions.save(fingerprint: fp, snapshot: Data([0x01]))
+        try await store.sessions.save(fingerprint: fp, snapshot: Data([0x02]))
+        XCTAssertEqual(try await store.sessions.load(fingerprint: fp), Data([0x02]))
+    }
+
+    func testSessionLoadAllAndDelete() async throws {
+        let fp1 = String(repeating: "aa", count: 32)
+        let fp2 = String(repeating: "bb", count: 32)
+        try await store.sessions.save(fingerprint: fp1, snapshot: Data([0x01]))
+        try await store.sessions.save(fingerprint: fp2, snapshot: Data([0x02]))
+        let all = try await store.sessions.loadAll()
+        XCTAssertEqual(all.count, 2)
+        XCTAssertEqual(all[fp1], Data([0x01]))
+
+        try await store.sessions.delete(fingerprint: fp1)
+        XCTAssertNil(try await store.sessions.load(fingerprint: fp1))
+        XCTAssertEqual(try await store.sessions.loadAll().count, 1)
+
+        try await store.sessions.deleteAll()
+        XCTAssertTrue(try await store.sessions.loadAll().isEmpty)
+    }
+
+    /// Sessions survive close/reopen — the durability contract Fix 2 needs.
+    /// Also proves the v2 migration ran on a fresh database.
+    func testSessionsSurviveReopen() async throws {
+        let fp = String(repeating: "ef", count: 32)
+        let blob = Data("durable".utf8)
+        try await store.sessions.save(fingerprint: fp, snapshot: blob)
+
+        let reopened = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
+        XCTAssertEqual(try await reopened.sessions.load(fingerprint: fp), blob)
+    }
+
+    /// A v1 database (no ratchet_session table, user_version=1) migrates
+    /// cleanly to v2 on the next open: the table is created and usable.
+    func testV1ToV2Migration() async throws {
+        // Start at v2 with data, then downgrade the on-disk state to v1.
+        try await store.sessions.save(fingerprint: "aa", snapshot: Data([0x01]))
+        let conn = await store.conn
+        try conn.exec("DROP TABLE ratchet_session;")
+        try conn.exec("DELETE FROM schema_migrations WHERE version = 2;")
+        try conn.exec("PRAGMA user_version = 1;")
+        store = nil // release the old connection before reopening
+
+        // Reopening must re-apply the v2 migration cleanly.
+        let migrated = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
+        store = migrated
+        XCTAssertTrue(try await migrated.sessions.loadAll().isEmpty)
+        try await migrated.sessions.save(fingerprint: "aa", snapshot: Data([0x02]))
+        XCTAssertEqual(try await migrated.sessions.load(fingerprint: "aa"), Data([0x02]))
+    }
 }

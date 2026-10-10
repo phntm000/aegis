@@ -37,6 +37,10 @@ struct AegisApp: App {
                         appState.privacy.shield()
                     case .background:
                         appState.appLock.lockIfEnabled()
+                        // Persist ratchet session snapshots before the OS
+                        // suspends us, so conversations resume without X3DH
+                        // re-establishment on the next launch.
+                        Task { await appState.crypto.flushSessions() }
                     case .active:
                         appState.privacy.unshield()
                         appState.notifications.clearDelivered()

@@ -64,6 +64,9 @@ public enum AegisCryptoError: Error, Equatable, CustomStringConvertible {
     case certificateExpired
     /// Wire `version` byte is not one this build understands.
     case unsupportedVersion(UInt8)
+    /// A session snapshot's format version is newer than this build
+    /// understands. Callers must fall back to X3DH re-establishment.
+    case unsupportedSnapshotVersion(Int)
     /// A KDF was given invalid parameters (programmer error).
     case kdfFailed(String)
 
@@ -82,6 +85,7 @@ public enum AegisCryptoError: Error, Equatable, CustomStringConvertible {
         case .staleEpoch: return "group message from an evicted epoch"
         case .certificateExpired: return "sealed-sender certificate outside validity window"
         case .unsupportedVersion(let v): return "unsupported wire version \(v)"
+        case .unsupportedSnapshotVersion(let v): return "unsupported session snapshot version \(v)"
         case .kdfFailed(let why): return "key derivation failed: \(why)"
         }
     }

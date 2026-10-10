@@ -109,6 +109,7 @@ public actor SQLCipherAegisStore: AegisDatabase,
     public nonisolated var memberships: any GroupMembershipRepository { self }
     public nonisolated var attachments: any AttachmentRepository { self }
     public nonisolated var calls: any CallRecordRepository { self }
+    public nonisolated var sessions: any SessionRepository { self }
 
     public func transaction<T: Sendable>(
         _ work: @Sendable () async throws -> T

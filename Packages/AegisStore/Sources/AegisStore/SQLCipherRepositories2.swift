@@ -510,3 +510,48 @@ extension SQLCipherAegisStore {
         try await update(r)
     }
 }
+
+// MARK: - SessionRepository
+
+extension SQLCipherAegisStore: SessionRepository {
+    public func save(fingerprint: String, snapshot: Data) async throws {
+        try conn.exec(
+            """
+            INSERT INTO ratchet_session(fingerprint, snapshot, updated_at)
+            VALUES (?,?,?)
+            ON CONFLICT(fingerprint) DO UPDATE SET
+              snapshot = excluded.snapshot,
+              updated_at = excluded.updated_at;
+            """,
+            [.text(fingerprint), .blob(snapshot), .real(Date().timeIntervalSince1970)]
+        )
+    }
+
+    public func load(fingerprint: String) async throws -> Data? {
+        let rows = try conn.query(
+            "SELECT snapshot FROM ratchet_session WHERE fingerprint = ?;",
+            [.text(fingerprint)]
+        )
+        guard let row = rows.first, case .blob(let data) = row["snapshot"] else { return nil }
+        return data
+    }
+
+    public func loadAll() async throws -> [String: Data] {
+        var out: [String: Data] = [:]
+        for row in try conn.query("SELECT fingerprint, snapshot FROM ratchet_session;") {
+            guard case .text(let fp) = row["fingerprint"],
+                  case .blob(let data) = row["snapshot"]
+            else { continue }
+            out[fp] = data
+        }
+        return out
+    }
+
+    public func delete(fingerprint: String) async throws {
+        try conn.exec("DELETE FROM ratchet_session WHERE fingerprint = ?;", [.text(fingerprint)])
+    }
+
+    public func deleteAll() async throws {
+        try conn.exec("DELETE FROM ratchet_session;")
+    }
+}

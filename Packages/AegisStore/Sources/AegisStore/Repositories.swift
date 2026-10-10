@@ -170,6 +170,29 @@ public protocol CallRecordRepository: Sendable {
     func setRecordingConsent(callID: CallID, userID: UserID, consented: Bool) async throws
 }
 
+// MARK: - Ratchet sessions
+
+/// Durable Double Ratchet session state, keyed by peer fingerprint hex.
+///
+/// The stored blob is an opaque versioned snapshot produced by
+/// `AegisCrypto.RatchetSessionSnapshot.serialized()` — this repository
+/// never inspects it, only stores and returns it. Snapshots hold current
+/// chain/root keys (never past message keys); they are stored inside the
+/// SQLCipher database, so their at-rest protection equals the messages'.
+/// They are deliberately EXCLUDED from the encrypted-backup `StoreSnapshot`:
+/// a backup restored to a new device re-establishes sessions via X3DH
+/// rather than resurrecting stale session state.
+public protocol SessionRepository: Sendable {
+    /// Upserts the session snapshot for a peer fingerprint (hex).
+    func save(fingerprint: String, snapshot: Data) async throws
+    /// Returns the snapshot for a peer, or nil when there is none.
+    func load(fingerprint: String) async throws -> Data?
+    /// Returns all stored sessions keyed by peer fingerprint hex.
+    func loadAll() async throws -> [String: Data]
+    func delete(fingerprint: String) async throws
+    func deleteAll() async throws
+}
+
 // MARK: - Composite store
 
 /// The single entry point the app holds. Backed in production by the
@@ -181,6 +204,7 @@ public protocol AegisDatabase: Sendable {
     var memberships: any GroupMembershipRepository { get }
     var attachments: any AttachmentRepository { get }
     var calls: any CallRecordRepository { get }
+    var sessions: any SessionRepository { get }
 
     /// Runs `work` inside a single transaction. Nested transactions are
     /// flattened (savepoints in SQLCipher; re-entrant lock in memory).

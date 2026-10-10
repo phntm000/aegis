@@ -13,7 +13,7 @@
 
 enum StoreSchema {
     /// Current schema version. Must match SQLCipherStoreDescriptor.schemaVersion.
-    static let version = 1
+    static let version = 2
 
     static let v1 = """
         CREATE TABLE IF NOT EXISTS schema_migrations(
@@ -186,5 +186,17 @@ enum StoreSchema {
           ON group_membership(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_call_conv_started
           ON call_record(conversation_id, started_at DESC);
+        """
+
+    /// v2 delta: durable Double Ratchet session snapshots, keyed by peer
+    /// fingerprint hex. Applied to existing v1 databases by the migration
+    /// chain in SQLCipherConnection.migrate(); fresh databases get v1+v2.
+    /// The snapshot BLOB is opaque to the store (versioned by AegisCrypto).
+    static let v2 = """
+        CREATE TABLE IF NOT EXISTS ratchet_session(
+          fingerprint TEXT PRIMARY KEY,
+          snapshot BLOB NOT NULL,
+          updated_at REAL NOT NULL
+        );
         """
 }

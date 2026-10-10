@@ -59,6 +59,10 @@ struct LiveCryptoService: CryptoService {
         try await engine.deleteIdentity()
     }
 
+    func flushSessions() async {
+        await engine.flushSessions()
+    }
+
     // MARK: Fingerprints & invites
 
     nonisolated func fingerprint(of publicKey: Data) -> String {

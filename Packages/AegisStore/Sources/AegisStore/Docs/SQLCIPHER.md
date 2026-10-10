@@ -113,6 +113,11 @@ compromise (pairs with the re-verification ceremony, FEATURES.md A40).
   CASCADE`, `attachment.message_id → message(id) ON DELETE CASCADE`,
   `group_membership.conversation_id → conversation(id) ON DELETE CASCADE`,
   `call_record.conversation_id → conversation(id) ON DELETE CASCADE`.
+- **v2 delta:** `ratchet_session(fingerprint TEXT PRIMARY KEY,
+  snapshot BLOB NOT NULL, updated_at REAL NOT NULL)` — durable Double
+  Ratchet session snapshots (opaque, versioned by AegisCrypto). No foreign
+  keys; sessions are keyed by peer fingerprint hex and deleted with the
+  identity wipe. Deliberately excluded from backup `StoreSnapshot`s.
   Enforced with `PRAGMA foreign_keys = ON` (off by default in SQLite —
   forgetting this is the classic bug; there is a test asserting cascade
   delete works).

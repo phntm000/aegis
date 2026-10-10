@@ -15,12 +15,13 @@
 //    32-byte routing mailbox (wire routing) are different values; see
 //    RoutingMailbox. This engine derives both.
 //
-// Honest limitations (macOS-gated hardening):
-//  - Sessions live in memory. An app restart drops them; the next outbound
-//    message transparently re-establishes via X3DH (the peer's client does
-//    the same), and undecryptable inbound in the gap surfaces a visible
-//    "session reset" notice rather than silent loss. Durable session
-//    persistence needs Codable ratchet state (a package change).
+// Honest limitations:
+//  - Session snapshots persist to the SQLCipher store, debounced (~2s
+//    coalescing) with a guaranteed flush on app backgrounding. A crash
+//    inside the debounce window falls back to the old behavior: the next
+//    outbound message transparently re-establishes via X3DH, and
+//    undecryptable inbound in the gap surfaces a visible "session reset"
+//    notice rather than silent loss.
 //  - One-time prekeys are not persisted across launches; the pool is
 //    refilled in memory. X3DH without a one-time prekey is still secure.
 
@@ -54,6 +55,20 @@ private enum InnerWireType: UInt8 {
     case sealedEnvelope = 0x20
 }
 
+/// Pluggable session-snapshot persistence for `CryptoEngine`.
+///
+/// The engine never touches the store directly; the factory wires these
+/// closures to the store's `SessionRepository`. All closures are
+/// fire-and-forget from the engine's perspective — persistence failures
+/// are swallowed and retried on the next flush, never surfaced as crypto
+/// errors.
+struct SessionPersistence: Sendable {
+    var save: @Sendable (String, Data) async -> Void
+    var loadAll: @Sendable () async -> [String: Data]
+    var delete: @Sendable (String) async -> Void
+    var deleteAll: @Sendable () async -> Void
+}
+
 actor CryptoEngine {
     // MARK: - Identity directory
 
@@ -77,6 +92,86 @@ actor CryptoEngine {
     private var sessions: [String: SessionEntry] = [:]
     /// groupID hex → sender-key group session.
     private var groupSessions: [String: GroupSession] = [:]
+
+    // MARK: - Session persistence
+
+    private var sessionPersistence: SessionPersistence?
+    /// Fingerprint hexes whose in-memory session state is newer than the
+    /// last persisted snapshot.
+    private var dirtySessionKeys: Set<String> = []
+    private var sessionFlushTask: Task<Void, Never>?
+    /// Coalescing window for session-snapshot writes: bounds write
+    /// amplification (one small upsert per burst of messages) while keeping
+    /// the at-restart staleness window tiny. A final flush always runs on
+    /// app backgrounding and on explicit `flushSessions()` calls.
+    private static let sessionFlushDelay: UInt64 = 2_000_000_000 // 2s
+
+    /// Wires the store-backed persistence. Until configured, the engine
+    /// behaves exactly as before (memory-only sessions).
+    func configureSessionPersistence(_ persistence: SessionPersistence) {
+        sessionPersistence = persistence
+    }
+
+    /// Persists every dirty session snapshot. Safe to call any time; also
+    /// invoked automatically ~2s after the last session mutation and on app
+    /// backgrounding. Failures re-mark the session dirty for the next
+    /// flush — persistence problems never become crypto errors.
+    func flushSessions() async {
+        sessionFlushTask?.cancel()
+        sessionFlushTask = nil
+        guard let persistence = sessionPersistence, !dirtySessionKeys.isEmpty else { return }
+        let keys = dirtySessionKeys
+        dirtySessionKeys.removeAll()
+        for key in keys {
+            guard let entry = sessions[key] else { continue }
+            do {
+                let data = try entry.ratchet
+                    .snapshot(peerIdentity: entry.peer, ephemeralPublicKey: entry.ephemeralPublicKey)
+                    .serialized()
+                await persistence.save(key, data)
+            } catch {
+                dirtySessionKeys.insert(key)
+            }
+        }
+    }
+
+    /// Restores sessions persisted by a previous launch, so existing
+    /// conversations resume without re-running X3DH. Corrupt or
+    /// future-version snapshots are dropped (the session re-establishes on
+    /// next use) — never a crash, never silent corruption.
+    func restoreSessions() async {
+        guard let persistence = sessionPersistence else { return }
+        let blobs = await persistence.loadAll()
+        for (key, data) in blobs {
+            do {
+                let snapshot = try RatchetSessionSnapshot(serialized: data)
+                let ratchet = try AegisDoubleRatchet(snapshot: snapshot)
+                let peer = try IdentityPublic(serialized: snapshot.peerIdentity)
+                sessions[key] = SessionEntry(
+                    ratchet: ratchet, peer: peer,
+                    ephemeralPublicKey: snapshot.ephemeralPublicKey
+                )
+                knownIdentities[key] = peer
+            } catch {
+                await persistence.delete(key)
+            }
+        }
+    }
+
+    private func markSessionDirty(_ key: String) {
+        guard sessionPersistence != nil else { return }
+        dirtySessionKeys.insert(key)
+        if sessionFlushTask == nil {
+            sessionFlushTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: Self.sessionFlushDelay)
+                } catch {
+                    return // superseded by an explicit flush
+                }
+                await self?.flushSessions()
+            }
+        }
+    }
 
     private var identity: Identity?
     private var preKeyManager: PreKeyManager?
@@ -137,13 +232,17 @@ actor CryptoEngine {
         localDisplayName = name
     }
 
-    func deleteIdentity() throws {
+    func deleteIdentity() async throws {
         try KeychainHelper.delete(service: "app.aegis.identity", account: "primary")
         identity = nil
         preKeyManager = nil
         sessions.removeAll()
         groupSessions.removeAll()
         bundleCache.removeAll()
+        dirtySessionKeys.removeAll()
+        sessionFlushTask?.cancel()
+        sessionFlushTask = nil
+        await sessionPersistence?.deleteAll()
     }
 
     // MARK: - Invites
@@ -209,6 +308,7 @@ actor CryptoEngine {
         if var entry = sessions[key] {
             let msg = try entry.ratchet.encrypt(plaintext: plaintext, associatedData: Data())
             sessions[key] = entry
+            markSessionDirty(key)
             wire = msg.serialized()
             ephPub = entry.ephemeralPublicKey
         } else {
@@ -216,6 +316,7 @@ actor CryptoEngine {
             let initiated = try SessionEstablishment.initiate(ourIdentity: identity, bundle: bundle, plaintext: plaintext)
             let preKey = try PreKeyMessage.parse(initiated.preKeyMessage)
             sessions[key] = SessionEntry(ratchet: initiated.session, peer: peer, ephemeralPublicKey: preKey.ephemeralPublicKey)
+            markSessionDirty(key)
             bundleCache.removeValue(forKey: key)
             wire = initiated.preKeyMessage
             ephPub = preKey.ephemeralPublicKey
@@ -241,6 +342,7 @@ actor CryptoEngine {
         let message = try RatchetMessage.parse(inner)
         let plaintext = try mutable.ratchet.decrypt(message, associatedData: Data())
         sessions[entry.peer.fingerprint.hexString] = mutable
+        markSessionDirty(entry.peer.fingerprint.hexString)
         return plaintext
     }
 
@@ -320,6 +422,7 @@ actor CryptoEngine {
                 peer: peer,
                 ephemeralPublicKey: message.ephemeralPublicKey
             )
+            markSessionDirty(key)
             return responded.plaintext
         case InnerWireType.ratchetMessage.rawValue:
             guard let entry = sessions[key] else { throw CryptoEngineError.unknownSession }

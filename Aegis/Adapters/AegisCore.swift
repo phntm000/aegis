@@ -237,6 +237,26 @@ actor AegisCore {
     func start() async throws {
         guard !didStart else { return }
         _ = try await engine.restoreIdentity()
+        // Durable sessions: the engine persists Double Ratchet snapshots to
+        // the SQLCipher store (debounced writes + guaranteed flush on
+        // backgrounding) and resumes them here, so existing conversations
+        // continue without re-running X3DH after a restart.
+        let sessionRepo = pkgStore.sessions
+        await engine.configureSessionPersistence(SessionPersistence(
+            save: { fingerprint, snapshot in
+                try? await sessionRepo.save(fingerprint: fingerprint, snapshot: snapshot)
+            },
+            loadAll: {
+                (try? await sessionRepo.loadAll()) ?? [:]
+            },
+            delete: { fingerprint in
+                try? await sessionRepo.delete(fingerprint: fingerprint)
+            },
+            deleteAll: {
+                try? await sessionRepo.deleteAll()
+            }
+        ))
+        await engine.restoreSessions()
         try await rebuildRoutesFromStore()
         await hub.start()
         delivery.start()

@@ -660,6 +660,112 @@ extension AegisDoubleRatchet {
     }
 }
 
+// MARK: - Session snapshots (durable persistence)
+//
+// The versioned Codable structs live in SessionSnapshot.swift. This
+// extension lives here (same file as the class) because it touches the
+// ratchet's private state.
+
+extension AegisDoubleRatchet {
+    /// Captures the session's full resumable state. The caller supplies the
+    /// peer identity and X3DH ephemeral key (they live in the session cache
+    /// entry, not the ratchet itself).
+    public func snapshot(peerIdentity: IdentityPublic, ephemeralPublicKey: Data) -> RatchetSessionSnapshot {
+        RatchetSessionSnapshot(
+            peerIdentity: peerIdentity.serialized(),
+            ephemeralPublicKey: ephemeralPublicKey,
+            rootKey: rootKey.withUnsafeBytes { Data($0) },
+            sendingChainKey: sendingChainKey?.withUnsafeBytes { Data($0) },
+            receivingChainKey: receivingChainKey?.withUnsafeBytes { Data($0) },
+            sendingRatchetPrivateKey: sendingRatchetKeyPair.privateKey.toData(),
+            sendingRatchetPublicKey: sendingRatchetKeyPair.publicKey,
+            receivingRatchetPublicKey: receivingRatchetPublicKey,
+            sendMessageNumber: sendMessageNumber,
+            receiveMessageNumber: receiveMessageNumber,
+            previousSendChainLength: previousSendChainLength,
+            skippedKeys: skippedKeys.map { (id, key) in
+                SkippedKeySnapshot(
+                    ratchetPublicKey: id.ratchetPublicKey,
+                    messageNumber: id.messageNumber,
+                    messageKey: key.messageKey.withUnsafeBytes { Data($0) },
+                    insertionOrder: key.insertionOrder
+                )
+            }
+        )
+    }
+
+    /// Restores a session from a snapshot. Validates the version and every
+    /// key length; re-derives the sending ratchet public key from the
+    /// private scalar and cross-checks it against the stored copy so a
+    /// corrupted snapshot can never silently resume a wrong session.
+    public convenience init(
+        snapshot: RatchetSessionSnapshot,
+        provider: any CryptoProvider = CryptoKitProvider.shared
+    ) throws {
+        guard snapshot.version <= RatchetSessionSnapshot.currentVersion else {
+            throw AegisCryptoError.unsupportedSnapshotVersion(snapshot.version)
+        }
+        // v1 is the only version so far; the switch is the migration point
+        // for future formats.
+        switch snapshot.version {
+        case 1: break
+        default: throw AegisCryptoError.unsupportedSnapshotVersion(snapshot.version)
+        }
+        guard snapshot.rootKey.count == 32,
+              snapshot.ephemeralPublicKey.count == 32,
+              snapshot.sendingRatchetPrivateKey.count == 32,
+              snapshot.sendingRatchetPublicKey.count == 32,
+              snapshot.sendingChainKey.map({ $0.count == 32 }) ?? true,
+              snapshot.receivingChainKey.map({ $0.count == 32 }) ?? true,
+              snapshot.receivingRatchetPublicKey.map({ $0.count == 32 }) ?? true
+        else {
+            throw AegisCryptoError.invalidKeyData
+        }
+        // The peer identity must parse — a snapshot for a malformed peer is
+        // corrupt by definition.
+        _ = try IdentityPublic(serialized: snapshot.peerIdentity)
+
+        let derivedPub = try X25519KeyPair.publicKey(
+            forPrivateKey: snapshot.sendingRatchetPrivateKey,
+            provider: provider
+        )
+        guard derivedPub == snapshot.sendingRatchetPublicKey else {
+            throw AegisCryptoError.invalidKeyData
+        }
+        let keyPair = X25519KeyPair(
+            privateKey: SecureBytes(snapshot.sendingRatchetPrivateKey),
+            publicKey: snapshot.sendingRatchetPublicKey
+        )
+
+        // Route through the responder initializer to set the provider,
+        // rootKey, and sendingRatchetKeyPair, then overwrite the rest.
+        // (The responder init leaves both chains nil, which we then fill.)
+        self.init(
+            responderRootKey: SymmetricKey(data: snapshot.rootKey),
+            ratchetKeyPair: keyPair,
+            provider: provider
+        )
+        self.sendingChainKey = snapshot.sendingChainKey.map { SymmetricKey(data: $0) }
+        self.receivingChainKey = snapshot.receivingChainKey.map { SymmetricKey(data: $0) }
+        self.receivingRatchetPublicKey = snapshot.receivingRatchetPublicKey
+        self.sendMessageNumber = snapshot.sendMessageNumber
+        self.receiveMessageNumber = snapshot.receiveMessageNumber
+        self.previousSendChainLength = snapshot.previousSendChainLength
+        var restored: [SkippedKeyID: SkippedKey] = [:]
+        var maxOrder: UInt64 = 0
+        for sk in snapshot.skippedKeys {
+            guard sk.ratchetPublicKey.count == 32, sk.messageKey.count == 32 else {
+                throw AegisCryptoError.invalidKeyData
+            }
+            restored[SkippedKeyID(ratchetPublicKey: sk.ratchetPublicKey, messageNumber: sk.messageNumber)] =
+                SkippedKey(messageKey: SymmetricKey(data: sk.messageKey), insertionOrder: sk.insertionOrder)
+            maxOrder = max(maxOrder, sk.insertionOrder)
+        }
+        self.skippedKeys = restored
+        self.skippedInsertionCounter = maxOrder &+ 1
+    }
+}
+
 private extension Data {
     func appending(_ other: Data) -> Data {
         var copy = self
