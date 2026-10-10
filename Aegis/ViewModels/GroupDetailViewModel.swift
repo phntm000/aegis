@@ -12,7 +12,9 @@ final class GroupDetailViewModel: ObservableObject {
 
     private(set) var conversation: Conversation
     private let appState: AppState
-    private var groupEventObserver: NSObjectProtocol?
+    // NSObjectProtocol isn't Sendable; deinit is nonisolated. The token is only
+    // ever touched on the main actor (or in deinit), so this is safe.
+    nonisolated(unsafe) private var groupEventObserver: NSObjectProtocol?
 
     private var transport: any TransportService { appState.transport }
     private var store: any StoreService { appState.store }

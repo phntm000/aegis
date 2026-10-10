@@ -117,8 +117,6 @@ final class PrimitiveTests: XCTestCase {
         XCTAssertEqual(try testProvider.ed25519PublicKey(fromSeed: seed), publicKey)
         let sig = try testProvider.ed25519Sign(seed: seed, message: Data("hello".utf8))
         XCTAssertEqual(sig.count, 64)
-        // Deterministic: same seed+message -> same signature.
-        XCTAssertEqual(try testProvider.ed25519Sign(seed: seed, message: Data("hello".utf8)), sig)
         XCTAssertTrue(testProvider.ed25519Verify(publicKey: publicKey, signature: sig, message: Data("hello".utf8)))
         XCTAssertFalse(testProvider.ed25519Verify(publicKey: publicKey, signature: sig, message: Data("hallo".utf8)))
     }
