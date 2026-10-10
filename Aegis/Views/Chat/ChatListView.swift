@@ -84,7 +84,6 @@ struct ChatListView: View {
                 await viewModel.load()
             }
         }
-    }
 
     // MARK: - List
 
@@ -244,6 +243,7 @@ struct ChatListView: View {
             }
         }
     }
+}
 
 /// Marker type for the archived-chats navigation destination.
 private struct ArchivedDestination: Hashable {}
