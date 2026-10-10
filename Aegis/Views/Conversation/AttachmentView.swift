@@ -159,12 +159,12 @@ struct VoiceNoteBubbleView: View {
                 ZStack {
                     Circle()
                         .fill(Color.black.opacity(0.12))
-                        .frame(width: 38, height: 38)
+                        .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
                     if isResolving {
                         ProgressView().tint(AegisColors.accent)
                     } else {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 15))
+                            .font(AegisType.callout)
                             .foregroundStyle(AegisColors.accent)
                     }
                 }

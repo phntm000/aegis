@@ -138,7 +138,7 @@ struct ConversationView: View {
                         .lineLimit(1)
                     if let label = viewModel.conversation.disappearingLabel {
                         Text(label)
-                            .font(.system(size: 10))
+                            .font(AegisType.caption)
                             .foregroundStyle(AegisColors.textTertiary)
                     }
                 }

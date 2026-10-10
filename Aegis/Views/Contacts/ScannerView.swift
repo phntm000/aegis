@@ -10,6 +10,9 @@ struct ScannerView: View {
     @State private var permission: AVAuthorizationStatus = .notDetermined
     @State private var torchOn = false
     @State private var didScan = false
+    /// Set once the user taps through the pre-permission rationale, so the
+    /// system prompt only ever fires from an explicit user action.
+    @State private var didRequestPermission = false
 
     var body: some View {
         NavigationStack {
@@ -22,7 +25,11 @@ struct ScannerView: View {
                         scanOverlay
                     }
                 case .notDetermined:
-                    LoadingOverlayView(label: "Requesting camera access…")
+                    if didRequestPermission {
+                        LoadingOverlayView(label: "Requesting camera access…")
+                    } else {
+                        cameraRationale
+                    }
                 case .denied, .restricted:
                     PermissionDeniedView(
                         icon: "qrcode.viewfinder",
@@ -56,13 +63,46 @@ struct ScannerView: View {
             }
             .onAppear {
                 permission = AVCaptureDevice.authorizationStatus(for: .video)
-                if permission == .notDetermined {
-                    AVCaptureDevice.requestAccess(for: .video) { granted in
-                        Task { @MainActor in
-                            permission = granted ? .authorized : .denied
-                        }
-                    }
-                }
+            }
+        }
+    }
+
+    /// Pre-permission rationale (HIG): explain the value before the
+    /// system prompt appears, so the user can decide with context.
+    private var cameraRationale: some View {
+        VStack(spacing: AegisLayout.l) {
+            Spacer()
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 52))
+                .foregroundStyle(AegisColors.accent)
+                .accessibilityHidden(true)
+            Text("Scan to add contacts")
+                .font(AegisType.title)
+                .foregroundStyle(AegisColors.textPrimary)
+            Text("Aegis needs the camera to scan your contact's identity QR code. Scanning happens entirely on this device — nothing is uploaded or shared.")
+                .font(AegisType.body)
+                .foregroundStyle(AegisColors.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Continue") {
+                requestCameraAccess()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AegisColors.accent)
+            .frame(minHeight: AegisLayout.minTapTarget)
+            .accessibilityHint("Shows the system camera permission prompt")
+            Button("Not now") { dismiss() }
+                .foregroundStyle(AegisColors.textSecondary)
+                .frame(minHeight: AegisLayout.minTapTarget)
+            Spacer()
+        }
+        .padding(.horizontal, AegisLayout.l)
+    }
+
+    private func requestCameraAccess() {
+        didRequestPermission = true
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            Task { @MainActor in
+                permission = granted ? .authorized : .denied
             }
         }
     }

@@ -139,7 +139,7 @@ struct ActiveCallView: View {
                     .font(AegisType.callout)
                     .foregroundStyle(AegisColors.textPrimary)
                 Text(sas.map(String.init).joined(separator: " "))
-                    .font(.system(size: 34, weight: .bold, design: .monospaced))
+                    .font(.system(.title, design: .monospaced).weight(.bold))
                     .foregroundStyle(AegisColors.textPrimary)
                     .accessibilityLabel("Security code: \(sas.map(String.init).joined(separator: ", "))")
                 Text("Read these characters aloud with \(call.contactName). If they match, no one can listen in.")

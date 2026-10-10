@@ -12,3 +12,5 @@ DerivedData/
 # Python
 __pycache__/
 *.pyc
+# Worker / cron bookkeeping — never ship to the repo
+.ci-logs/

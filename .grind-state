@@ -3,7 +3,7 @@
 
 current_item: hardening-audit-polish
 current_item_started_utc: 2026-10-10T10:52:20Z
-last_activity_utc: 2026-10-10T10:52:20Z
+last_activity_utc: 2026-10-10T10:56:07Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -43,3 +43,6 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - watchdog 2026-10-10T10:43:00Z: remote commits landing (latest 7510f826 10:35:44Z, ~8 min ago; cadence 09:54-10:35Z); phase3 worker alive and iterating CI failures (runs 38043026387..38045450495 red/cancelled cycle); per liveness rules, no worker spawned.
   - watchdog 2026-10-10T10:48:00Z: remote commits landing (latest 77b64fdc 10:44:13Z, ~4 min ago; cadence 09:55-10:44Z); phase3 worker alive and iterating CI failures; per liveness rules, no worker spawned.
   - phase3-calls-rooms-multidevice: done — voice/video calls (SAS ceremony, full-mesh audio voice rooms w/ mute/deafen/heartbeats) + multi-device (QR+SAS paired-relay model, message sync, linked-device bootstrap/onboarding) — CI green on run 38045941305 (commit 77b64fdc)
+  - watchdog 2026-10-10T10:54:00Z: work ALIVE — remote commits landing (latest 10:52:29Z "Grind: phase3 done, advance to hardening-audit-polish", ~1 min before check); CI run 38046428404 in_progress (created 10:52:32Z). Prior phase3 green run 38045941305 (success). Per liveness rules, no second worker spawned. current_item already hardening-audit-polish.
+  - MILESTONE: Phase 2 complete — phase2-groups-media: group lifecycle (epoch sync, forward secrecy, identity-sealed join), attachment persistence, offline outbox flush; CI green on 38041931244. (Reportable to user.)
+  - MILESTONE: Phase 3 complete — phase3-calls-rooms-multidevice: voice/video calls (SAS ceremony, full-mesh audio voice rooms w/ mute/deafen/heartbeats) + multi-device (QR+SAS paired-relay model, message sync, linked-device bootstrap/onboarding); CI green on run 38045941305 (commit 77b64fdc). (Reportable to user.)

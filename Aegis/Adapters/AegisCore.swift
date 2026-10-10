@@ -546,8 +546,9 @@ actor AegisCore {
         )
         var newRelay: RelayTransport? = nil
         if let url = resolved {
-            newRelay = RelayTransport(url: url)
-            transports.append(newRelay!)
+            let relay = RelayTransport(url: url)
+            transports.append(relay)
+            newRelay = relay
             effectiveRelayURL = url.absoluteString
         } else {
             effectiveRelayURL = nil

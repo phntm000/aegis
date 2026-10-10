@@ -280,14 +280,19 @@ enum SampleData {
     }
 
     static func previewConversation(title: String) -> Conversation {
-        seed().conversations.first(where: { $0.title == title })!
+        seed().conversations.first(where: { $0.title == title })
+            ?? seed().conversations.first
+            ?? Conversation(kind: .direct, title: title)
     }
 
     static func previewContact(name: String) -> Contact {
-        seed().contacts.first(where: { $0.displayName == name })!
+        seed().contacts.first(where: { $0.displayName == name })
+            ?? seed().contacts.first
+            ?? Contact(displayName: name, identityKey: Data())
     }
 
     static func previewGroupInfo() -> GroupInfo {
-        seed().groupInfos.values.first!
+        seed().groupInfos.values.first
+            ?? GroupInfo(conversationID: UUID(), members: [], senderKeyStatus: .active)
     }
 }

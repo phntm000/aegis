@@ -30,5 +30,12 @@
 	<string>Aegis uses the local network to reach contacts nearby and to sync without the internet in LAN-only mode.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Aegis uses Face ID to lock the app. Biometric data never leaves your device.</string>
+	<!-- Export compliance: Aegis is free, open-source, publicly available
+	     mass-market encryption software (X3DH + Double Ratchet + AES-GCM,
+	     all standard published algorithms). Claimed exempt from an ERN
+	     under EAR mass-market provisions; see docs/EXPORT_COMPLIANCE.md.
+	     Do not flip this without re-reading that doc. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

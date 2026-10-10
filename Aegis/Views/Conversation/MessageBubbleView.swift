@@ -118,16 +118,16 @@ struct MessageBubbleView: View {
         HStack(spacing: AegisLayout.xs) {
             if message.isEphemeral {
                 Image(systemName: "timer")
-                    .font(.system(size: 10))
+                    .font(AegisType.caption)
                     .accessibilityLabel("Disappearing message")
             }
             if message.isEdited {
                 Text("edited")
-                    .font(.system(size: 10))
+                    .font(AegisType.caption)
                     .italic()
             }
             Text(Formatters.bubbleTime(message.sentAt))
-                .font(.system(size: 10))
+                .font(AegisType.caption)
             if message.isFromMe {
                 ReadReceiptView(status: message.status)
             }
