@@ -39,3 +39,5 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - phase2-groups-media: done — group lifecycle (epoch sync, forward secrecy, identity-sealed join), attachment persistence, offline outbox flush; CI green on 38041931244
 
   - watchdog 2026-10-10T10:28:00Z: remote commits landing (latest 4a0ffa45 10:20:07Z, commits every ~2-10 min 09:51-10:20Z); phase3 worker alive and iterating CI failures (runs 38042886652..38044538294 red/cancelled cycle); per liveness rules, no second worker spawned.
+  - watchdog 2026-10-10T10:38:00Z: remote commits landing (latest 7510f826 10:35:44Z, ~3 min ago; cadence 10:08-10:35Z); CI runs red while worker iterates (38043896637..38045450495); per liveness rules, no worker spawned.
+  - watchdog 2026-10-10T10:43:00Z: remote commits landing (latest 7510f826 10:35:44Z, ~8 min ago; cadence 09:54-10:35Z); phase3 worker alive and iterating CI failures (runs 38043026387..38045450495 red/cancelled cycle); per liveness rules, no worker spawned.

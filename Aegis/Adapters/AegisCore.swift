@@ -1785,10 +1785,11 @@ actor AegisCore {
         // Voice-room mesh peers route by the room manager's per-peer table.
         let routes = await voiceRooms.peerRoutes
         if let route = routes[callID] {
+            let localFP = await voiceRoomLocalFingerprintHex() ?? ""
             var signal = VoiceRoomSignal(
                 kind: .ice,
                 roomID: route.roomID.uuidString,
-                senderFingerprintHex: voiceRoomLocalFingerprintHex() ?? ""
+                senderFingerprintHex: localFP
             )
             signal.targetFingerprintHex = route.peerFingerprintHex
             signal.callID = callID.uuidString
