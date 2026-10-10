@@ -262,7 +262,7 @@ actor DeviceLinkManager {
         hello.deviceID = localDeviceID
         hello.deviceName = deviceName
         #if os(iOS)
-        hello.deviceModel = UIDevice.current.model
+        hello.deviceModel = await UIDevice.current.model
         #endif
         try await core?.sendDeviceLinkFrame(try JSONEncoder().encode(hello), mailbox: mailbox)
         log.info("Secondary pairing hello sent; awaiting provisioning")
