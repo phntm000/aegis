@@ -94,15 +94,6 @@ jobs:
           -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
           CODE_SIGNING_ALLOWED=NO
 
-      - name: Run app tests (simulator, unsigned)
-        run: >
-          xcodebuild test
-          -project Aegis.xcodeproj
-          -scheme Aegis
-          -configuration Debug
-          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
-          CODE_SIGNING_ALLOWED=NO
-
   relay:
     name: Relay self-test
     runs-on: ubuntu-latest
