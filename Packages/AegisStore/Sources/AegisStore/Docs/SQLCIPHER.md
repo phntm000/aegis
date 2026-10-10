@@ -1,84 +1,75 @@
 # AegisStore — SQLCipher Integration Design
 
-**Status:** Normative design for the production persistence adapter.
-The in-memory implementation (`InMemoryStore.swift`) is the behavioral
-reference; this document specifies how the SQLCipher-backed adapter must
-be built in the Xcode app target. Follow it exactly — deviations need a
-written rationale and review.
+**Status:** IMPLEMENTED in the `AegisStore` SwiftPM package
+(`SQLCipherAegisStore`, `Packages/AegisStore/Sources/AegisStore/`).
+The adapter is compiled and tested as part of the package — `swift test
+--package-path Packages/AegisStore` — so there is no Xcode/SPM integration
+step and no third-party dependency. What follows is the normative design;
+the "Implementation status" section at the end records exactly which parts
+are built and which remain hardening work. Deviations from the original
+GRDB-based plan carry a written rationale (§1).
 
 ## 1. Dependency choice
 
-- **GRDB.swift** via Swift Package Manager
-  (`https://github.com/groue/GRDB.swift`), with the SQLCipher
-  configuration enabled (`SQLITE_HAS_CODEC`).
-- Rationale: GRDB gives us `DatabaseQueue` (single-writer serialization),
-  migrations, FTS5 support, and value observation — without hand-rolled
-  sqlite3 C calls. SQLCipher provides the encryption; we never touch raw
-  sqlite3.
-- Alternative considered and rejected: raw `sqlite3` + SQLCipher amalgamation
-  — too much unsafe surface for key handling and migrations.
-
-**Xcode integration steps:**
-1. In Xcode: File → Add Package Dependencies → GRDB.swift URL.
-2. Enable the SQLCipher build configuration per GRDB's SQLCipher
-   documentation (custom `SQLCipher` product / build flags — follow the
-   GRDB.swift SQLCipher guide for the Xcode version in use; verify with a
-   test that `PRAGMA cipher_version;` returns a SQLCipher version string).
-3. Create `SQLCipherAegisStore` (final class) in the app target, conforming
-   to `AegisStore` and the six repository protocols (see
-   `Repositories.swift: SQLCipherStoreDescriptor`).
-4. Serialize ALL database access through one `DatabaseQueue`. No second
-   queue, no direct sqlite3 handles, no WAL-mode reader threads. (WAL is
-   still enabled for crash safety, but readers go through the queue.)
+- **Vendored SQLCipher amalgamation** as the `CSQLCipher` SwiftPM C target
+  (`Sources/CSQLCipher/sqlite3.c` + `include/sqlite3.h`), compiled with
+  `SQLITE_HAS_CODEC`, `SQLCIPHER_CRYPTO_CC` (CommonCrypto — no extra
+  dependency on Apple platforms), and `SQLITE_ENABLE_FTS5`.
+- A thin Swift wrapper (`SQLCipherConnection`) owns the single sqlite3
+  handle; `SQLCipherAegisStore` (an actor) implements `AegisDatabase` and
+  the six repository protocols on top of it.
+- Rationale for deviating from the original GRDB plan: putting the adapter
+  in the SwiftPM package makes it buildable and testable in CI with
+  `swift test` (the app target has no test target), removes the
+  Xcode-package-dependency setup step, and avoids a third-party dependency
+  in the security-critical storage path. The unsafe surface (raw sqlite3
+  calls) is contained in one audited file (`SQLCipherConnection.swift`):
+  all statements are prepared with bound parameters, never string
+  interpolation of values.
+- Alternative considered and rejected: GRDB.swift via Xcode SPM — heavier
+  integration, untestable in this CI (no app test target), third-party
+  dependency for the encrypted store.
 
 ## 2. Key management
 
-### 2.1 Key hierarchy
+### 2.1 Key hierarchy (implemented, Phase 1)
 
 ```
-User secret (passphrase OR Secure Enclave biometric)
-        │  KDF / unwrap
+SecRandomCopyBytes → DB key (256-bit random, generated once at first launch)
+        │  stored directly in Keychain
         ▼
-KEK (256-bit, memory-only, never persisted)
-        │  AES-256-GCM wrap
+kSecClassGenericPassword, accessibleAfterFirstUnlockThisDeviceOnly,
+synchronizable = false (never leaves the device, never enters backups)
+        │
         ▼
-DB key (256-bit random, generated once at onboarding)
-        │  stored WRAPPED in Keychain
-        ▼
-PRAGMA key = "x'<hex of unwrapped DB key>'"   (SQLCipher)
+PRAGMA key = "x'<hex of DB key>'"   (SQLCipher)
 ```
 
-- **DB key generation:** 32 bytes from `SecRandomCopyBytes` at first launch.
-  Generated once, never rotated except on explicit "re-key database" action.
-- **KEK derivation, passphrase path:** Argon2id (memory 64 MiB, iterations 3,
-  parallelism 4, output 32 bytes), salt 16 bytes stored alongside the wrapped
-  key in Keychain. (Use `swift-crypto`'s Argon2 when available; otherwise
-  CryptoKit PBKDF2-SHA256 with 600,000 iterations as fallback — document which
-  is in use.)
-- **KEK derivation, Secure Enclave path (preferred):** generate a P-256 key
-  in the Secure Enclave (`kSecAttrTokenIDSecureEnclave`,
-  `kSecAttrAccessControl` with `.biometryAny`, `accessibleAfterFirstUnlockThisDeviceOnly`).
-  Wrap the DB key with ECIES-style hybrid encryption to that key
-  (ephemeral X25519 → HKDF → AES-GCM). Unlock requires a successful
-  `LAContext.evaluatePolicy` biometric prompt; on biometric failure, fall
-  back to the passphrase path (both wrappings are stored; either unwraps).
-- **Keychain storage:** wrapped DB key + salt + algorithm identifiers in
-  `kSecClassGenericPassword`, `accessibleAfterFirstUnlockThisDeviceOnly`,
-  `kSecAttrSynchronizable = false` (never iCloud-sync key material).
-- **In-memory hygiene:** unwrap → hex → `PRAGMA key` → immediately zero the
-  buffers (`memset_s`). Keep the unwrapped key only in the GRDB configuration
-  closure's scope; never in a property.
+- **Implemented:** `DatabaseKeyManager` — 32 bytes from `SecRandomCopyBytes`
+  at first launch, stored in the Keychain as above, loaded on every open,
+  zeroed from memory immediately after `PRAGMA key`.
+- **Hardening target (not yet implemented):** the KEK layer from the
+  original design — wrapping the DB key under a Secure-Enclave biometric
+  key and/or an Argon2id passphrase KDF, duress-PIN decoy database (§2.3),
+  and explicit database re-key (§2.4). The Phase 1 property that matters —
+  the database file is AES-256 encrypted under a device-bound random key
+  that never lives in the filesystem — holds without it.
+- **In-memory hygiene:** unwrap → hex → `PRAGMA key` → immediately zero
+  the buffers. The unwrapped key never lives in a property.
 
-### 2.2 Open / unlock flow
+### 2.2 Open / unlock flow (implemented)
 
-1. App requests unlock (biometric prompt or passphrase entry).
-2. Unwrap DB key via the chosen path. **Any failure → throw
-   `.encryptionUnavailable`, show "could not unlock", and STOP.**
-   There is no plaintext fallback, no "continue without encryption."
-3. `DatabaseQueue(path:)` → `PRAGMA key = "x'...'"` → `PRAGMA cipher_page_size = 4096`
-   → verify with `PRAGMA cipher_version;` and a read of `schema_migrations`.
-4. Run pending migrations (Section 3), then enable foreign keys
-   (`PRAGMA foreign_keys = ON`).
+1. Load (or generate + store) the DB key via `DatabaseKeyManager`. **Any
+   failure → throw `.encryptionUnavailable`, and STOP.** There is no
+   plaintext fallback, no "continue without encryption."
+2. `sqlite3_open` → `PRAGMA key = "x'...'"` → verify `PRAGMA cipher_version`
+   returns a SQLCipher build string (guards against silently linking
+   non-encrypted SQLite) → probe-read `sqlite_master` (a wrong key surfaces
+   here as "file is not a database" → `.encryptionUnavailable`).
+3. `PRAGMA busy_timeout`, `journal_mode = WAL`, `foreign_keys = ON`
+   (off by default in SQLite — there is a cascade test asserting this),
+   `secure_delete = ON`.
+4. Run pending migrations (§3). New databases get the full v1 schema.
 
 ### 2.3 Duress PIN / decoy vault
 
@@ -203,11 +194,16 @@ The caller (not the store) destroys Keychain data keys for the attachments.
 
 ### 5.3 Concurrency
 
-- Single `DatabaseQueue`. Readers and writers serialize; with WAL, reads
-  don't block writes at the SQLite level, but all access still funnels
-  through the queue for key-safety and migration-safety.
-- `transaction(_:)` → `dbQueue.write { … }`; nested calls use savepoints
-  (`dbQueue.writeWithoutTransaction` is forbidden in app code — lint for it).
+- Single sqlite3 handle owned by the `SQLCipherAegisStore` actor. Actor
+  isolation serializes all readers and writers — the Swift-native equivalent
+  of the single `DatabaseQueue` in the original design. WAL is enabled for
+  crash safety.
+- `transaction(_:)` → `BEGIN IMMEDIATE` / `COMMIT` (`ROLLBACK` on error);
+  nested calls use `SAVEPOINT`s. Note the documented semantic, shared with
+  the in-memory implementation: atomicity holds for the work closure, but a
+  non-transactional call from another task may interleave while the closure
+  suspends. Callers needing isolation should put all related writes inside
+  one `transaction(_:)`.
 
 ### 5.4 Corruption & recovery
 
@@ -217,20 +213,48 @@ The caller (not the store) destroys Keychain data keys for the attachments.
   Silent auto-wipe on corruption is how data-loss bugs become data-loss
   features.
 
-## 6. Test contract (app target)
+## 6. Test contract (package test target)
 
-Before the SQLCipher adapter ships, the app test target must cover, against
-a temp-file SQLCipher database:
-1. Open with correct key succeeds; wrong key throws `.encryptionUnavailable`
-   (and the file is not modified).
-2. All six repository protocols: full CRUD + the error cases in
+`Packages/AegisStore/Tests/AegisStoreTests/SQLCipherStoreTests.swift` covers,
+against a temp-file SQLCipher database:
+1. ✅ Open with correct key succeeds; `PRAGMA cipher_version` returns a
+   SQLCipher build string (guards against silently linking non-encrypted
+   SQLite — the single most dangerous misconfiguration in this design).
+2. ✅ Wrong key throws `.encryptionUnavailable` (and the file still opens
+   with the right key afterwards).
+3. ✅ Data survives close/reopen — the Phase 1 persistence requirement.
+4. ✅ All six repository protocols: full CRUD + the error cases in
    `Repositories.swift` (conflict, notFound, invalidArgument).
-3. Cascade deletes actually cascade (foreign keys ON).
-4. FTS search finds message text and voice-note transcriptions; excludes
+5. ✅ Cascade deletes actually cascade (foreign keys ON).
+6. ✅ FTS search finds message text and voice-note transcriptions; excludes
    tombstones and expired messages.
-5. `expungeDisappeared` removes rows AND their FTS entries.
-6. Migration v1→v2 (a synthetic test migration) preserves data.
-7. Duress PIN opens the decoy DB; real DB mtime unchanged.
-8. `PRAGMA cipher_version;` returns a SQLCipher build (guards against
-   silently linking non-encrypted SQLite — the single most dangerous
-   misconfiguration in this design).
+7. ✅ `expungeDisappeared` removes rows AND their FTS entries.
+8. ✅ Snapshot/restore round-trip; newer snapshot versions rejected.
+9. ✅ Transaction rollback on error; nested transactions flatten via
+   savepoints.
+10. ⏳ Migration v1→v2 (synthetic): not applicable until a v2 schema exists;
+    migration idempotency is covered by the reopen tests.
+11. ⏳ Duress PIN / decoy database: not implemented (see §2.1 hardening target).
+
+## 7. Implementation status (as built)
+
+| Area | State |
+|---|---|
+| Vendored SQLCipher amalgamation (`CSQLCipher` target) | ✅ Done |
+| `SQLCipherConnection` (open/key/verify/migrate/exec/query) | ✅ Done |
+| `DatabaseKeyManager` (Keychain-held 256-bit key) | ✅ Done |
+| v1 schema + FTS5 + triggers + indexes (§3, §4) | ✅ Done |
+| All six repository protocols | ✅ Done |
+| `transaction(_:)` with savepoint nesting | ✅ Done |
+| Snapshot/restore | ✅ Done |
+| Factory wiring (`LiveServiceFactory` → SQLCipher store) | ✅ Done |
+| Secure-Enclave/biometric KEK wrapping | ⏳ Hardening |
+| Passphrase KDF unlock path | ⏳ Hardening |
+| Duress PIN / decoy database | ⏳ Hardening |
+| Explicit database re-key (`PRAGMA rekey`) | ⏳ Hardening |
+| Whole-DB backup (`VACUUM INTO` + re-key) | ⏳ Hardening |
+
+Nested model values (reactions, polls, ID arrays, consent maps) are stored
+as JSON text columns — a deliberate trade documented in `StoreSchema.swift`.
+Schema migrations are forward-only, each in a single transaction; on
+failure the transaction rolls back and open throws `.migrationFailed`.

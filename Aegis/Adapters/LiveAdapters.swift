@@ -779,7 +779,13 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
     private let storeService: LiveStoreService
 
     init() throws {
-        let pkgStore: any AegisDatabase = InMemoryAegisStore()
+        // Production persistence: SQLCipher-encrypted database at
+        // Application Support/Aegis/aegis.db, unlocked with the
+        // Keychain-held 256-bit database key (generated on first launch).
+        // Conversations, messages, and contacts survive app restart.
+        // (Previews and unit tests keep using InMemoryAegisStore.)
+        let dbPath = try SQLCipherAegisStore.defaultDatabasePath()
+        let pkgStore: any AegisDatabase = try SQLCipherAegisStore.openSync(at: dbPath)
         let sidecars = try ConversationSidecarStore()
         let keyDirectory = try ContactKeyDirectory()
         let engine = CryptoEngine { [pkgStore, keyDirectory] fingerprint in

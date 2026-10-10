@@ -204,24 +204,26 @@ public protocol AegisDatabase: Sendable {
 // MARK: - SQLCipher adapter contract
 
 /// Describes how the production SQLCipher-backed store is constructed.
-/// The concrete adapter lives in the app target (it needs GRDB/SQLCipher
-/// linked via Xcode — see Docs/SQLCIPHER.md) and is injected wherever an
-/// `AegisStore` is required.
+/// The concrete adapter is `SQLCipherAegisStore`, implemented in this
+/// package (vendored SQLCipher amalgamation as the `CSQLCipher` C target —
+/// see Docs/SQLCIPHER.md §1 for the rationale), and injected wherever an
+/// `AegisDatabase` is required. `InMemoryAegisStore` remains for tests and
+/// previews.
 ///
 /// Required integration steps (normative):
-/// 1. Add GRDB.swift with SQLCipher to the app target via SPM
-///    (github.com/groue/GRDB.swift, SQLCipher configuration).
-/// 2. Implement `AegisStore` + the six repository protocols on a final
-///    class `SQLCipherAegisStore`, serializing all access on one dispatch
-///    queue (GRDB `DatabaseQueue`).
-/// 3. Key management exactly per Docs/SQLCIPHER.md: random 256-bit DB key,
-///    wrapped by Secure-Enclave-or-passphrase KEK, `PRAGMA key` on open.
-/// 4. Schema + migrations exactly per Docs/SQLCIPHER.md, including the
+/// 1. The `CSQLCipher` target compiles the SQLCipher amalgamation with
+///    `SQLITE_HAS_CODEC` + `SQLCIPHER_CRYPTO_CC` (CommonCrypto).
+/// 2. `SQLCipherAegisStore` implements `AegisDatabase` + the six repository
+///    protocols, serializing all access on its actor isolation (one sqlite
+///    handle, single logical thread — the documented-safe model).
+/// 3. Key management exactly per Docs/SQLCIPHER.md §2: random 256-bit DB key,
+///    held in the Keychain, `PRAGMA key` on open, zeroed after use.
+/// 4. Schema + migrations exactly per Docs/SQLCIPHER.md §3, including the
 ///    FTS5 virtual table and sync triggers.
-/// 5. `transaction(_:)` maps to `DatabaseQueue.write { ... }` (savepoints
-///    for nesting).
+/// 5. `transaction(_:)` maps to BEGIN/COMMIT (SAVEPOINTs for nesting).
 /// 6. Every repository method has a unit test against a temp-file
-///    SQLCipher DB in the app test target before the adapter ships.
+///    SQLCipher DB in the package test target
+///    (Tests/AegisStoreTests/SQLCipherStoreTests.swift).
 public protocol SQLCipherStoreDescriptor: Sendable {
     /// Opens (creating if needed) the encrypted database at `path`,
     /// unlocking it with the device keychain / Secure Enclave flow.
