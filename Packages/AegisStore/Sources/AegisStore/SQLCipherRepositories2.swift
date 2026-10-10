@@ -77,7 +77,7 @@ extension SQLCipherAegisStore {
         var sql = "SELECT * FROM contact"
         if !includeBlocked { sql += " WHERE is_blocked = 0" }
         sql += " ORDER BY is_favorite DESC, display_name COLLATE NOCASE ASC;"
-        return try conn.query(sql).map(decodeContact)
+        return try conn.query(sql).map { try decodeContact($0) }
     }
 
     public func delete(id: UserID) async throws {
@@ -186,7 +186,7 @@ extension SQLCipherAegisStore {
             """,
             [.text(conversationID.rawValue)]
         )
-        return try rows.map(decodeMembership)
+        return try rows.map { try decodeMembership($0) }
     }
 
     public func role(
@@ -327,7 +327,7 @@ extension SQLCipherAegisStore {
             "SELECT * FROM attachment WHERE message_id = ? ORDER BY rowid ASC;",
             [.text(messageID.rawValue)]
         )
-        return try rows.map(decodeAttachment)
+        return try rows.map { try decodeAttachment($0) }
     }
 
     public func update(_ attachment: Attachment) async throws {
@@ -471,7 +471,7 @@ extension SQLCipherAegisStore {
             """,
             [.text(conversationID.rawValue), .int(Int64(max(0, limit)))]
         )
-        return try rows.map(decodeCallRecord)
+        return try rows.map { try decodeCallRecord($0) }
     }
 
     public func update(_ record: CallRecord) async throws {

@@ -147,17 +147,17 @@ public actor SQLCipherAegisStore: AegisDatabase,
 
     public func snapshot() async throws -> StoreSnapshot {
         let conversations = try conn.query("SELECT * FROM conversation;")
-            .map(decodeConversation)
+            .map { try decodeConversation($0) }
         let messages = try conn.query("SELECT * FROM message;")
-            .map(decodeMessage)
+            .map { try decodeMessage($0) }
         let contacts = try conn.query("SELECT * FROM contact;")
-            .map(decodeContact)
+            .map { try decodeContact($0) }
         let memberships = try conn.query("SELECT * FROM group_membership;")
-            .map(decodeMembership)
+            .map { try decodeMembership($0) }
         let attachments = try conn.query("SELECT * FROM attachment;")
-            .map(decodeAttachment)
+            .map { try decodeAttachment($0) }
         let callRecords = try conn.query("SELECT * FROM call_record;")
-            .map(decodeCallRecord)
+            .map { try decodeCallRecord($0) }
         return StoreSnapshot(
             conversations: conversations,
             messages: messages,

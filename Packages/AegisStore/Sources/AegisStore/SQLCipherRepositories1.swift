@@ -110,7 +110,7 @@ extension SQLCipherAegisStore {
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
         // Pinned first, then most recently updated.
         sql += " ORDER BY is_pinned DESC, updated_at DESC;"
-        return try conn.query(sql, args).map(decodeConversation)
+        return try conn.query(sql, args).map { try decodeConversation($0) }
     }
 
     public func update(_ conversation: Conversation) async throws {
@@ -251,7 +251,7 @@ extension SQLCipherAegisStore {
             sqlDate(m.readAt),
             .int(Int64(m.secrecyEpoch)),
             try encodeJSON(m.reactions),
-            try m.poll.map(encodeJSON) ?? .null,
+            try m.poll.map { try encodeJSON($0) } ?? .null,
             try encodeJSON(m.attachmentIDs),
             sqlDate(m.createdAt),
             sqlDate(m.updatedAt),
@@ -343,7 +343,7 @@ extension SQLCipherAegisStore {
         sql += " ORDER BY created_at DESC, id DESC LIMIT ?;"
         args.append(.int(Int64(limit + 1)))
         let rows = try conn.query(sql, args)
-        let messages = try rows.prefix(limit).map(decodeMessage)
+        let messages = try rows.prefix(limit).map { try decodeMessage($0) }
         return MessagePage(messages: Array(messages), hasMore: rows.count > limit)
     }
 
@@ -410,7 +410,7 @@ extension SQLCipherAegisStore {
         sql += " ORDER BY m.created_at DESC LIMIT ?;"
         args.append(.int(Int64(max(0, limit))))
         do {
-            return try conn.query(sql, args).map(decodeMessage)
+            return try conn.query(sql, args).map { try decodeMessage($0) }
         } catch let e as AegisStoreError {
             // FTS5 query-syntax errors (unbalanced quotes etc. in user
             // input) are not data errors: return no hits rather than fail
@@ -458,7 +458,7 @@ extension SQLCipherAegisStore {
             """,
             [sqlDate(now)]
         )
-        return try rows.map(decodeMessage)
+        return try rows.map { try decodeMessage($0) }
     }
 
     public func setDeliveryState(
