@@ -29,7 +29,10 @@ public protocol VideoSink: AnyObject, Sendable {
 
 /// Routes remote video frames to the per-call sink. One sink per call;
 /// registering a second sink replaces the first.
-public final class CallMediaRouter: Sendable {
+///
+/// Manually synchronized: every access to `sinks` goes through `lock`,
+/// hence `@unchecked Sendable`.
+public final class CallMediaRouter: @unchecked Sendable {
     private let lock = NSLock()
     private var sinks: [UUID: WeakVideoSink] = [:]
 

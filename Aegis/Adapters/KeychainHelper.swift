@@ -34,7 +34,7 @@ enum KeychainHelper {
         private var values: [String: Data] = [:]
         func get(_ key: String) -> Data? { lock.withLock { values[key] } }
         func set(_ key: String, _ value: Data) { lock.withLock { values[key] = value } }
-        func remove(_ key: String) { lock.withLock { values.removeValue(forKey: key) } }
+        func remove(_ key: String) { _ = lock.withLock { values.removeValue(forKey: key) } }
     }
     private static let testStore = TestStore()
 

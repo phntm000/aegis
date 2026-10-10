@@ -108,7 +108,7 @@ public final class RelayTransport: NSObject, Transport, @unchecked Sendable {
     }
 
     public func unbind(_ mailbox: MailboxID) async {
-        lock.withLock { boundMailboxes.remove(mailbox) }
+        _ = lock.withLock { boundMailboxes.remove(mailbox) }
         if state.value == .connected, let ws = lock.withLock({ socket }) {
             try? await ws.send(.string(RelayClientOp.unbind(mailbox).encode()))
         }
@@ -243,7 +243,8 @@ extension RelayTransport: URLSessionDelegate {
     ) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
         guard let pin = pinnedCertificateSHA256,
               let trust = challenge.protectionSpace.serverTrust,
-              let certificate = SecTrustGetCertificateAtIndex(trust, 0)
+              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let certificate = chain.first
         else {
             // No pin configured: default system trust. Operators and users
             // are strongly encouraged to set a pin (see SELF_HOSTING.md).

@@ -68,7 +68,7 @@ enum SampleData {
             lastMessageAt: now.addingTimeInterval(-120),
             lastMessageIsFromMe: false
         )
-        var groupDesign = Conversation(
+        let groupDesign = Conversation(
             kind: .group,
             title: "Design sync",
             subtitle: "Weekly critique · Thursdays",
@@ -78,7 +78,7 @@ enum SampleData {
             lastMessageAt: now.addingTimeInterval(-3600),
             lastMessageIsFromMe: false
         )
-        var channelAnnounce = Conversation(
+        let channelAnnounce = Conversation(
             kind: .channel,
             title: "Announcements",
             subtitle: "Release notes and status",
@@ -90,7 +90,7 @@ enum SampleData {
             lastMessageAt: now.addingTimeInterval(-86400),
             lastMessageIsFromMe: false
         )
-        var dmJonas = Conversation(
+        let dmJonas = Conversation(
             kind: .direct,
             title: "Jonas Weber",
             memberIDs: [jonas.id],
@@ -124,7 +124,7 @@ enum SampleData {
             status: .read,
             sentAt: now.addingTimeInterval(-300)
         )
-        var m3 = Message(
+        let m3 = Message(
             conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
             body: "Yes — 24 hours. Anything sensitive evaporates on both sides.",
             reactions: ["👍": [identity.id]],
@@ -138,7 +138,7 @@ enum SampleData {
             status: .read,
             sentAt: now.addingTimeInterval(-600)
         )
-        var m5 = Message(
+        let m5 = Message(
             conversationID: dmMaya.id, senderID: identity.id, isFromMe: true,
             body: "Will do. Bringing the QR too.",
             status: .read,

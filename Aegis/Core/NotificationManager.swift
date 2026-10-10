@@ -3,7 +3,7 @@ import UserNotifications
 
 /// `UNNotificationSettings` is effectively immutable (all properties are
 /// readonly); the SDK just doesn't annotate it.
-extension UNNotificationSettings: @unchecked Sendable {}
+extension UNNotificationSettings: @retroactive @unchecked Sendable {}
 
 /// Local notifications for messages and calls arriving while the app is
 /// backgrounded. Aegis has no push server — these are scheduled on-device

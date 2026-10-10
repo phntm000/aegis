@@ -431,7 +431,7 @@ struct LiveTransportService: TransportService {
     nonisolated var screenShareSupported: Bool { true }
 
     func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {
-        Task { [core] in await core.mediaRouter.setVideoSink(sink, for: callID) }
+        Task { [core] in core.mediaRouter.setVideoSink(sink, for: callID) }
     }
 
     // MARK: Groups
@@ -967,7 +967,7 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
         }
         Task {
             await core.setMediaDelegate(mediaEngine)
-            mediaEngine.attachFrameRouter(await core.mediaRouter)
+            mediaEngine.attachFrameRouter(core.mediaRouter)
         }
     }
 
@@ -988,7 +988,7 @@ struct LiveVoiceRoomService: VoiceRoomService {
     let core: AegisCore
 
     var events: AsyncStream<VoiceRoomEvent> {
-        get async { await core.voiceRooms.events }
+        get async { core.voiceRooms.events }
     }
 
     func currentRoom() async -> VoiceRoom? {
@@ -1031,11 +1031,11 @@ struct LiveDeviceLinkService: DeviceLinkService {
     }
 
     var pairingEvents: AsyncStream<DeviceLinkManager.PairingEvent> {
-        get async { await core.deviceLink.pairingEvents }
+        get async { core.deviceLink.pairingEvents }
     }
 
     var syncEvents: AsyncStream<DeviceLinkManager.SyncEvent> {
-        get async { await core.deviceLink.syncEvents }
+        get async { core.deviceLink.syncEvents }
     }
 
     func beginPairingAsPrimary() async throws -> DeviceLinkManager.PrimaryPairingContext {

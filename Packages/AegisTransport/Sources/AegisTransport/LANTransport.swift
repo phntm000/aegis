@@ -53,7 +53,7 @@ public final class LANTransport: NSObject, Transport, @unchecked Sendable {
     }
 
     public func unbind(_ mailbox: MailboxID) {
-        lock.withLock { boundMailboxes.remove(mailbox) }
+        _ = lock.withLock { boundMailboxes.remove(mailbox) }
     }
 
     // MARK: Transport

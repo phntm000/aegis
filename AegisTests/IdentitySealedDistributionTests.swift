@@ -74,7 +74,7 @@ final class IdentitySealedDistributionTests: XCTestCase {
     }
 
     func testUnknownSenderFailsClosed() async throws {
-        let (alice, bob, _, bobPub) = try await makePair()
+        let (alice, _, _, bobPub) = try await makePair()
         let dist = try await aliceDistributionForBob(alice: alice, bobPub: bobPub)
         let sealed = try await alice.sealDistributionForIdentityKey(dist, recipient: bobPub)
 
@@ -90,7 +90,7 @@ final class IdentitySealedDistributionTests: XCTestCase {
     }
 
     func testWrongRecipientFailsClosed() async throws {
-        let (alice, bob, _, bobPub) = try await makePair()
+        let (alice, _, _, bobPub) = try await makePair()
         let dist = try await aliceDistributionForBob(alice: alice, bobPub: bobPub)
         // Sealed for Bob...
         let sealed = try await alice.sealDistributionForIdentityKey(dist, recipient: bobPub)

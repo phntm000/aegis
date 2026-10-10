@@ -1062,7 +1062,7 @@ final class AppState: ObservableObject {
             }
         case .sendMessage:
             // Primary only: the linked device asks us to send a message.
-            guard await !isLinkedDevice else { return }
+            guard !isLinkedDevice else { return }
             if let req = try? JSONDecoder().decode(LinkedSendRequest.self, from: message.body) {
                 await sendLinkedDeviceMessage(req)
             }
@@ -1137,7 +1137,7 @@ final class AppState: ObservableObject {
 
     /// Forwards a newly sent/received message to linked devices (primary).
     func forwardToLinkedDevices(_ message: Message, conversation: Conversation, senderName: String?) async {
-        guard await !isLinkedDevice else { return }
+        guard !isLinkedDevice else { return }
         let linked = LinkedIncomingMessage(
             message: message.asLinked(senderName: senderName),
             conversation: LinkedConversation(

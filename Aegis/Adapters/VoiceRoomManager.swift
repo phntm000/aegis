@@ -372,11 +372,10 @@ actor VoiceRoomManager {
     }
 
     private func expireStaleParticipants() async {
-        guard var current = room else { return }
+        guard let current = room else { return }
         let stale = current.participants.filter { !$0.isLocal && $0.isStale }
         guard !stale.isEmpty else { return }
         for p in stale { await removeParticipant(fingerprintHex: p.fingerprintHex) }
-        _ = current
         emit()
     }
 

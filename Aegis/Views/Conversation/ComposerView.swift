@@ -26,7 +26,7 @@ struct ComposerView: View {
                     viewModel.replyingTo = nil
                 }
             }
-            if let editing = viewModel.editingMessage {
+            if viewModel.editingMessage != nil {
                 editBanner {
                     viewModel.editingMessage = nil
                     viewModel.draft = ""

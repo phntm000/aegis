@@ -111,7 +111,7 @@ final class BroadcastState<Value: Sendable>: @unchecked Sendable {
                 continuation.yield(self.current)
             }
             continuation.onTermination = { [weak self] _ in
-                self?.lock.withLock { self?.continuations.removeValue(forKey: id) }
+                _ = self?.lock.withLock { self?.continuations.removeValue(forKey: id) }
             }
         }
     }
@@ -132,7 +132,7 @@ final class Broadcast<Value: Sendable>: @unchecked Sendable {
             let id = UUID()
             self.lock.withLock { self.continuations[id] = continuation }
             continuation.onTermination = { [weak self] _ in
-                self?.lock.withLock { self?.continuations.removeValue(forKey: id) }
+                _ = self?.lock.withLock { self?.continuations.removeValue(forKey: id) }
             }
         }
     }

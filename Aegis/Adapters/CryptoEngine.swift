@@ -454,7 +454,7 @@ actor CryptoEngine {
         knownIdentities[key] = peer
         let wire: Data
         let ephPub: Data
-        if var entry = sessions[key] {
+        if let entry = sessions[key] {
             let msg = try entry.ratchet.encrypt(plaintext: plaintext, associatedData: Data())
             sessions[key] = entry
             markSessionDirty(key)
@@ -549,7 +549,7 @@ actor CryptoEngine {
     }
 
     private func decryptWithSession(_ inner: Data, entry: SessionEntry) throws -> (plaintext: Data, sender: IdentityPublic) {
-        var mutable = entry
+        let mutable = entry
         let message = try RatchetMessage.parse(inner)
         let plaintext = try mutable.ratchet.decrypt(message, associatedData: Data())
         sessions[entry.peer.fingerprint.hexString] = mutable
@@ -796,7 +796,7 @@ actor CryptoEngine {
             outputByteCount: 32
         )
         let nonce = try provider.randomBytes(count: 12)
-        let plaintext = try distribution.serialized()
+        let plaintext = distribution.serialized()
         let sealed = try provider.aesGCMSeal(
             plaintext: plaintext, key: key, nonce: nonce, associatedData: participantBinding
         )

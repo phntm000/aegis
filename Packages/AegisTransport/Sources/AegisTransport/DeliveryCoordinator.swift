@@ -232,7 +232,7 @@ public final class DeliveryCoordinator: NSObject, @unchecked Sendable {
     }
 
     public func untrackMailbox(_ mailbox: MailboxID) {
-        lock.withLock { trackedMailboxes.remove(mailbox) }
+        _ = lock.withLock { trackedMailboxes.remove(mailbox) }
         Task { await self.hub.unbind(mailbox) }
     }
 
