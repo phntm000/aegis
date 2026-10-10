@@ -19,6 +19,11 @@ final class IdentityChangeTests: XCTestCase {
     /// Prekey from the new identity, presented on the old peer's route:
     /// decrypt must succeed (X3DH) and report the NEW identity as sender.
     func testPreKeyFromChangedIdentityReportsNewSender() async throws {
+        // Sealed sender is ON by default in the app host; this test covers
+        // the unsealed route, so pin it off for determinism.
+        UserDefaults.standard.set(false, forKey: SettingsKeys.sealedSender)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsKeys.sealedSender) }
+
         let alice = makeEngine()
         let bob1 = makeEngine()
         let bob2 = makeEngine()
@@ -73,9 +78,13 @@ final class IdentityChangeTests: XCTestCase {
     /// The engine must reject it — the certificate fingerprint does not
     /// match the authenticated sender.
     func testMismatchedSealedCertificateFailsClosed() async throws {
+        UserDefaults.standard.set(false, forKey: SettingsKeys.sealedSender)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsKeys.sealedSender) }
+
         let alice = makeEngine()
         let malloryEngine = makeEngine()
         let alicePub = try await alice.createIdentity(displayName: "Alice")
+        _ = try await malloryEngine.createIdentity(displayName: "Mallory")
         // Bob exists only as a fingerprint to impersonate.
         let bobFP = Data(SHA256.hash(data: Data("bob".utf8)))
 
@@ -123,6 +132,9 @@ final class IdentityChangeTests: XCTestCase {
 
     /// Ratchet messages keep reporting the pinned session peer.
     func testRatchetMessageReportsSessionPeer() async throws {
+        UserDefaults.standard.set(false, forKey: SettingsKeys.sealedSender)
+        defer { UserDefaults.standard.removeObject(forKey: SettingsKeys.sealedSender) }
+
         let alice = makeEngine()
         let bob = makeEngine()
         let alicePub = try await alice.createIdentity(displayName: "Alice")
