@@ -29,9 +29,15 @@ struct RemoteVideoView: UIViewRepresentable {
     }
 }
 
+/// CMSampleBuffer isn't marked Sendable in the SDK, but sample buffers are
+/// immutable after creation and CoreMedia hands them safely across queues;
+/// this box records that contract for the main-actor hop below.
+private struct SendableSampleBuffer: @unchecked Sendable {
+    let value: CMSampleBuffer
+}
+
 final class RemoteVideoUIView: UIView, VideoSink {
     private var displayLayer = AVSampleBufferDisplayLayer()
-
     override init(frame: CGRect) {
         super.init(frame: frame)
         displayLayer.videoGravity = .resizeAspectFill
@@ -49,17 +55,26 @@ final class RemoteVideoUIView: UIView, VideoSink {
     /// Main-actor hop is inside: the VideoSink contract delivers frames on an
     /// arbitrary queue and requires the sink to reach the main thread
     /// itself, so this witness is `nonisolated` and hops explicitly.
+    /// CMSampleBuffer isn't marked Sendable in the SDK, but sample buffers
+    /// are immutable after creation and CoreMedia documents them as safe
+    /// to hand across queues — the @unchecked box records exactly that.
     nonisolated func renderRemoteFrame(_ sampleBuffer: CMSampleBuffer, forCall callID: UUID) {
+        let box = SendableSampleBuffer(sampleBuffer)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            if self.displayLayer.status == .failed {
-                // A failed layer never recovers; rebuild it so video
-                // resumes with the next frame instead of staying black.
-                self.rebuildDisplayLayer()
-            }
-            guard self.displayLayer.isReadyForMoreMediaData else { return }
-            self.displayLayer.enqueue(sampleBuffer)
+            self.enqueueRemoteFrame(box.value)
         }
+    }
+
+    @MainActor
+    private func enqueueRemoteFrame(_ sampleBuffer: CMSampleBuffer) {
+        if displayLayer.status == .failed {
+            // A failed layer never recovers; rebuild it so video
+            // resumes with the next frame instead of staying black.
+            rebuildDisplayLayer()
+        }
+        guard displayLayer.isReadyForMoreMediaData else { return }
+        displayLayer.enqueue(sampleBuffer)
     }
 
     private func rebuildDisplayLayer() {

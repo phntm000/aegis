@@ -209,21 +209,25 @@ extension WebRTCMediaEngine: CallMediaDelegate {
         let media = try lock.withLock { try peerLocked(for: callID) }
         lock.withLock { addLocalTracksLocked(to: media) }
         lock.withLock { media.createdOffer = true }
-        let offer: RTCSessionDescription = try await withCheckedThrowingContinuation { cont in
+        let offerSDP: String = try await withCheckedThrowingContinuation { cont in
             media.connection.offer(
                 for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
             ) { sdp, error in
                 if let error = error {
                     cont.resume(throwing: EngineError.sdpFailure(error.localizedDescription))
-                } else if let sdp = sdp {
-                    cont.resume(returning: sdp)
+                } else if let sdpString = sdp?.sdp {
+                    // Extract the Sendable String inside the callback:
+                    // RTCSessionDescription is not Sendable in M154, so the
+                    // object itself must not cross the continuation boundary.
+                    cont.resume(returning: sdpString)
                 } else {
                     cont.resume(throwing: EngineError.sdpFailure("empty offer"))
                 }
             }
         }
+        let offer = RTCSessionDescription(type: .offer, sdp: offerSDP)
         try await setLocalDescription(offer, for: callID)
-        return (offer.sdp, SDPFingerprint.extract(from: offer.sdp) ?? "")
+        return (offerSDP, SDPFingerprint.extract(from: offerSDP) ?? "")
     }
 
     func createAnswer(for callID: UUID, offerSDP: String) async throws -> (sdp: String, dtlsFingerprint: String) {
@@ -231,21 +235,24 @@ extension WebRTCMediaEngine: CallMediaDelegate {
         try await setRemoteDescription(RTCSessionDescription(type: .offer, sdp: offerSDP), for: callID)
         let media = try lock.withLock { try peerLocked(for: callID) }
         lock.withLock { addLocalTracksLocked(to: media) }
-        let answer: RTCSessionDescription = try await withCheckedThrowingContinuation { cont in
+        let answerSDP: String = try await withCheckedThrowingContinuation { cont in
             media.connection.answer(
                 for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
             ) { sdp, error in
                 if let error = error {
                     cont.resume(throwing: EngineError.sdpFailure(error.localizedDescription))
-                } else if let sdp = sdp {
-                    cont.resume(returning: sdp)
+                } else if let sdpString = sdp?.sdp {
+                    // See createOffer: don't send the non-Sendable
+                    // RTCSessionDescription across the continuation.
+                    cont.resume(returning: sdpString)
                 } else {
                     cont.resume(throwing: EngineError.sdpFailure("empty answer"))
                 }
             }
         }
+        let answer = RTCSessionDescription(type: .answer, sdp: answerSDP)
         try await setLocalDescription(answer, for: callID)
-        return (answer.sdp, SDPFingerprint.extract(from: answer.sdp) ?? "")
+        return (answerSDP, SDPFingerprint.extract(from: answerSDP) ?? "")
     }
 
     func setRemoteSDP(_ sdp: String, for callID: UUID) async throws {
