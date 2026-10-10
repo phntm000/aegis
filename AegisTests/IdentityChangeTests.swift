@@ -92,7 +92,8 @@ final class IdentityChangeTests: XCTestCase {
         let key = try SealedSender.sealedSenderKey(
             privateKey: eph.privateKey.toData(),
             peerPublicKey: alicePub.agreementPublicKey,
-            mailboxID: mailboxID
+            mailboxID: mailboxID,
+            provider: CryptoKitProvider.shared
         )
         let cert = SenderCertificate(
             senderFingerprint: bobFP,
