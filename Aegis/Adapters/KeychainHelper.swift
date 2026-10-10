@@ -27,7 +27,9 @@ enum KeychainHelper {
     }
 
     /// Lock-guarded in-memory stand-in for the keychain, test runs only.
-    private final class TestStore: Sendable {
+    /// `@unchecked Sendable`: every access goes through `lock`, which the
+    /// compiler cannot verify — the manual discipline is the guarantee.
+    private final class TestStore: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [String: Data] = [:]
         func get(_ key: String) -> Data? { lock.withLock { values[key] } }
