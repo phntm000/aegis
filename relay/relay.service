@@ -1,0 +1,37 @@
+[Unit]
+Description=Aegis dumb relay (blind E2EE courier)
+Documentation=https://github.com/phntm000/aegis
+After=network.target
+
+[Service]
+Type=simple
+# Run as an unprivileged user with nothing to steal: all state is in RAM.
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/aegis-relay
+ExecStart=/usr/bin/python3 /opt/aegis-relay/relay.py
+
+# Bind localhost by default; put Caddy/Nginx in front for public TLS.
+Environment=AEGIS_HOST=127.0.0.1
+Environment=AEGIS_PORT=8765
+# Uncomment to require a shared operator token for all clients:
+# Environment=AEGIS_TOKEN=change-me-to-something-long-and-random
+# Uncomment for aggregate-only stdout metrics (no identifiers, ever):
+# Environment=AEGIS_METRICS=1
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the relay holds no secrets, but defense in depth is free.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

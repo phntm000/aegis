@@ -1,0 +1,14 @@
+# Xcode
+build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+# SPM
+.build/
+# macOS
+.DS_Store
+# Python
+__pycache__/
+*.pyc

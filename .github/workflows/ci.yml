@@ -1,0 +1,96 @@
+# Aegis CI
+#
+# Runs on GitHub's macOS runners because Swift/iOS builds require Apple's
+# toolchain (Swift cannot compile on Linux). Three jobs:
+#   1. swift-packages — `swift test` for each SPM library package
+#   2. app           — XcodeGen generates the project, xcodebuild builds + tests
+#   3. relay         — the Python relay's self-test (runs on ubuntu; no Xcode needed)
+#
+# No paid Apple Developer account is required: builds use CODE_SIGNING_ALLOWED=NO
+# and tests run on the iOS Simulator.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODE_APP: /Applications/Xcode_16.2.app
+
+jobs:
+  swift-packages:
+    name: Swift packages (build + test)
+    runs-on: macos-14
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Test AegisStore
+        run: swift test --package-path Packages/AegisStore
+
+      - name: Test AegisCrypto
+        run: swift test --package-path Packages/AegisCrypto
+
+      - name: Test AegisTransport
+        run: swift test --package-path Packages/AegisTransport
+
+  app:
+    name: iOS app (XcodeGen + xcodebuild)
+    runs-on: macos-14
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app (simulator, unsigned)
+        run: >
+          xcodebuild build
+          -project Aegis.xcodeproj
+          -scheme Aegis
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Run app tests (simulator, unsigned)
+        run: >
+          xcodebuild test
+          -project Aegis.xcodeproj
+          -scheme Aegis
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+          CODE_SIGNING_ALLOWED=NO
+
+  relay:
+    name: Relay self-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Relay self-test
+        run: python3 relay/relay.py --self-test

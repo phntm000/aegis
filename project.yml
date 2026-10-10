@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/yonaskolb/XcodeGen/master/Distributions/XcodeGen.schema.json
+#
+# Aegis — XcodeGen project definition.
+# Generate with:  xcodegen generate
+#
+# The app target compiles against the three local SwiftPM packages owned by
+# the other workstreams (AegisCrypto, AegisTransport, AegisStore). Until those
+# land, the app builds and previews against the mock services in
+# Aegis/Support/PreviewServices.swift — see Aegis/INTEGRATION_NOTES.md.
+
+name: Aegis
+
+options:
+  bundleIdPrefix: app.aegis
+  deploymentTarget:
+    iOS: "17.0"
+  indentWidth: 2
+  usesTabs: false
+  createIntermediateGroups: true
+
+# Local packages (Agent 4 owns their Package.swift manifests).
+# If a package's library product is named differently, update `products` below.
+packages:
+  AegisCrypto:
+    path: Packages/AegisCrypto
+  AegisTransport:
+    path: Packages/AegisTransport
+  AegisStore:
+    path: Packages/AegisStore
+
+targets:
+  Aegis:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Aegis
+        excludes:
+          - "INTEGRATION_NOTES.md"
+          - "**/*.md"
+    dependencies:
+      - package: AegisCrypto
+        products:
+          - AegisCrypto
+      - package: AegisTransport
+        products:
+          - AegisTransport
+      - package: AegisStore
+        products:
+          - AegisStore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "" # <-- set your Apple team id for device builds
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
+        CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: YES
+        ENABLE_APP_TRANSPORT_SECURITY: YES
+    info:
+      properties:
+        CFBundleDisplayName: Aegis
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - audio # encrypted calls continue in background
+          - fetch # store-and-forward pickup while backgrounded (no APNs by design)
+        NSCameraUsageDescription: "Aegis uses the camera to scan QR codes when adding contacts. Scans are processed on-device and never uploaded."
+        NSMicrophoneUsageDescription: "Aegis uses the microphone for voice notes and end-to-end encrypted voice and video calls."
+        NSPhotoLibraryUsageDescription: "Aegis needs photo library access so you can share photos. Files are encrypted on-device before upload."
+        NSLocalNetworkUsageDescription: "Aegis uses the local network to reach contacts nearby and to sync without the internet in LAN-only mode."
+        NSFaceIDUsageDescription: "Aegis uses Face ID to lock the app. Biometric data never leaves your device."

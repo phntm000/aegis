@@ -1,0 +1,162 @@
+import AegisTransport
+import Foundation
+
+// MARK: - TransportService
+//
+// What the app needs from the AegisTransport package.
+//
+// The transport owns: peer discovery (LAN mDNS + relay WebSocket), envelope
+// delivery, encrypted blob upload/download, call signaling + WebRTC media, and
+// group membership operations. It never sees plaintext — envelopes carry only
+// ciphertext produced by AegisCrypto.
+
+enum EnvelopeKind: String, Sendable, Codable {
+    case message
+    case reaction
+    case edit
+    case delete
+    case readReceipt
+    case typing
+    case screenshotNotice
+    case callSignal
+    case groupControl
+}
+
+/// Ciphertext headed to the network.
+struct OutgoingEnvelope: Sendable, Hashable {
+    let id: UUID
+    let conversationID: UUID
+    let ciphertext: Data
+    let kind: EnvelopeKind
+}
+
+/// Ciphertext arrived from the network, awaiting decryption by AegisCrypto.
+struct IncomingEnvelope: Sendable, Hashable {
+    let id: UUID
+    let conversationID: UUID
+    let senderKey: Data
+    let ciphertext: Data
+    let receivedAt: Date
+    let kind: EnvelopeKind
+}
+
+struct RelayConfig: Sendable, Codable, Hashable {
+    enum Mode: String, Sendable, Codable {
+        /// Try LAN first, fall back to the default community relay.
+        case automatic
+        /// Never touch the internet; LAN peers only. Bannered in the UI.
+        case lanOnly
+        /// A self-hosted relay. 100% free, user-operated.
+        case customRelay
+    }
+
+    var mode: Mode
+    var customRelayURL: String?
+
+    static let `default` = RelayConfig(mode: .automatic, customRelayURL: nil)
+}
+
+struct RelayTestResult: Sendable, Hashable {
+    let reachable: Bool
+    let latencyMs: Int?
+    let detail: String
+}
+
+/// A live-call state transition pushed by the transport's signaling layer.
+struct CallStateEvent: Sendable, Hashable {
+    let callID: UUID
+    let state: ActiveCallState
+}
+
+/// A live group/channel membership change, translated by the transport
+/// adapter from the verified wire event into app concepts.
+struct GroupEvent: Sendable, Hashable {
+    enum Kind: String, Sendable, Codable {
+        case memberJoined
+        case memberRemoved
+        case roleChanged
+        case topicChanged
+        case announcementModeChanged
+    }
+
+    let conversationID: UUID
+    let kind: Kind
+    /// Identity fingerprint for member-scoped events.
+    let memberKey: Data?
+    /// New role for memberJoined / roleChanged.
+    let role: MemberRole?
+    /// New topic for topicChanged (nil = cleared).
+    let topic: String?
+    /// New value for announcementModeChanged.
+    let announcementOnly: Bool?
+}
+
+protocol TransportService: Sendable {
+    // MARK: Event streams
+
+    var connectionEvents: AsyncStream<ConnectionState> { get }
+    var incomingEnvelopes: AsyncStream<IncomingEnvelope> { get }
+    var incomingCallEvents: AsyncStream<IncomingCall> { get }
+    var callStateEvents: AsyncStream<CallStateEvent> { get }
+    /// Verified group membership changes (member join/remove, role, topic,
+    /// announcement mode). Powers live roster updates in GroupDetailView.
+    var groupEvents: AsyncStream<GroupEvent> { get }
+
+    // MARK: Connectivity
+
+    func currentConnectionState() async -> ConnectionState
+    func configureRelay(_ config: RelayConfig) async throws
+    func currentRelayConfig() async -> RelayConfig
+    func retryConnection() async
+    /// Probe a relay URL from settings; never blocks the UI.
+    func testRelay(url: String) async -> RelayTestResult
+
+    // MARK: Messaging
+
+    func sendEnvelope(_ envelope: OutgoingEnvelope) async throws
+    func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws
+    func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws
+    /// Notify peers that the local user took a screenshot (opt-in setting).
+    func sendScreenshotNotice(conversationID: UUID) async throws
+
+    // MARK: Encrypted blobs (ciphertext only on the wire)
+
+    /// Upload; the returned stream reports 0...1 progress and finishes on completion.
+    func uploadBlob(from fileURL: URL, conversationID: UUID, id: UUID) -> AsyncStream<Double>
+    func downloadBlob(locator: String, id: UUID, to fileURL: URL) -> AsyncStream<Double>
+    /// Locator string to store with the attachment so recipients can fetch
+    /// the blob. Format: `<routing-mailbox hex>:<attachment UUID hex>`.
+    func blobLocator(attachmentID: UUID, conversationID: UUID) async throws -> String
+
+    // MARK: Calls (signaling + media owned by the transport)
+
+    /// Returns the new call id. Throws when the peer is unreachable.
+    func placeCall(to contactID: UUID, kind: CallKind) async throws -> UUID
+    func answerCall(_ callID: UUID) async throws
+    func declineCall(_ callID: UUID) async throws
+    func endCall(_ callID: UUID) async throws
+    func setCallMuted(_ muted: Bool, callID: UUID) async throws
+    func setCallVideoEnabled(_ enabled: Bool, callID: UUID) async throws
+    func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws
+    func startScreenShare(callID: UUID) async throws
+    func stopScreenShare(callID: UUID) async throws
+    /// False on platforms/transports without a capture pipeline; the UI then
+    /// explains instead of showing a dead button.
+    var screenShareSupported: Bool { get }
+    /// Register the view that renders decoded remote video frames for a
+    /// call (see AegisTransport.CallMediaRouter / VideoSink). Pass nil to
+    /// unregister. Dropped silently when the call has no media pipeline.
+    func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID)
+
+    // MARK: Groups & channels
+
+    func createGroup(name: String, memberKeys: [Data]) async throws -> UUID
+    func createChannel(name: String, topic: String?, announcementOnly: Bool) async throws -> UUID
+    func inviteMember(_ contactID: UUID, to conversationID: UUID) async throws
+    func removeMember(_ contactID: UUID, from conversationID: UUID) async throws
+    func setMemberRole(_ contactID: UUID, role: MemberRole, in conversationID: UUID) async throws
+    func setAnnouncementOnly(_ enabled: Bool, conversationID: UUID) async throws
+    func setGroupTopic(_ topic: String?, conversationID: UUID) async throws
+    func rotateSenderKey(conversationID: UUID) async throws
+    func leaveConversation(_ conversationID: UUID) async throws
+}
