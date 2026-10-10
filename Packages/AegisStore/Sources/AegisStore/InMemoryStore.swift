@@ -22,7 +22,7 @@ public actor InMemoryAegisStore: AegisStore {
     private var messageOrder: [ConversationID: [MessageID]] = [:]
     private var contactsByID: [UserID: Contact] = [:]
     /// conversationID -> userID -> membership
-    private var memberships: [ConversationID: [UserID: GroupMembership]] = [:]
+    private var membershipsByConversation: [ConversationID: [UserID: GroupMembership]] = [:]
     private var attachmentsByID: [AttachmentID: Attachment] = [:]
     /// messageID -> attachment IDs in display order
     private var attachmentsByMessage: [MessageID: [AttachmentID]] = [:]
@@ -55,7 +55,7 @@ public actor InMemoryAegisStore: AegisStore {
             conversations: Array(conversationsByID.values),
             messages: Array(messagesByID.values),
             contacts: Array(contactsByID.values),
-            memberships: memberships.values.flatMap { Array($0.values) },
+            memberships: membershipsByConversation.values.flatMap { Array($0.values) },
             attachments: Array(attachmentsByID.values),
             callRecords: Array(callsByID.values)
         )
@@ -88,7 +88,7 @@ public actor InMemoryAegisStore: AegisStore {
         for membership in snapshot.memberships {
             rebuiltMemberships[membership.conversationID, default: [:]][membership.userID] = membership
         }
-        memberships = rebuiltMemberships
+        membershipsByConversation = rebuiltMemberships
         attachmentsByID = Dictionary(
             uniqueKeysWithValues: snapshot.attachments.map { ($0.id, $0) }
         )
@@ -160,7 +160,7 @@ public actor InMemoryAegisStore: AegisStore {
             attachmentsByMessage.removeValue(forKey: messageID)
         }
         messageOrder.removeValue(forKey: id)
-        memberships.removeValue(forKey: id)
+        membershipsByConversation.removeValue(forKey: id)
         for callID in callsByConversation[id] ?? [] {
             callsByID.removeValue(forKey: callID)
         }
@@ -422,20 +422,20 @@ public actor InMemoryAegisStore: AegisStore {
     // MARK: - GroupMembershipRepository
 
     public func upsert(_ membership: GroupMembership) async throws {
-        var members = memberships[membership.conversationID] ?? [:]
+        var members = membershipsByConversation[membership.conversationID] ?? [:]
         members[membership.userID] = membership
-        memberships[membership.conversationID] = members
+        membershipsByConversation[membership.conversationID] = members
     }
 
     public func remove(conversationID: ConversationID, userID: UserID) async throws {
-        guard memberships[conversationID]?.removeValue(forKey: userID) != nil else {
+        guard membershipsByConversation[conversationID]?.removeValue(forKey: userID) != nil else {
             throw AegisStoreError.notFound(
                 "membership \(userID) in \(conversationID)")
         }
     }
 
     public func members(of conversationID: ConversationID) async throws -> [GroupMembership] {
-        Array((memberships[conversationID] ?? [:]).values)
+        Array((membershipsByConversation[conversationID] ?? [:]).values)
             .sorted { $0.joinedAt < $1.joinedAt }
     }
 
@@ -443,7 +443,7 @@ public actor InMemoryAegisStore: AegisStore {
         of userID: UserID,
         in conversationID: ConversationID
     ) async throws -> MemberRole? {
-        memberships[conversationID]?[userID]?.role
+        membershipsByConversation[conversationID]?[userID]?.role
     }
 
     public func setRole(
@@ -451,17 +451,17 @@ public actor InMemoryAegisStore: AegisStore {
         userID: UserID,
         role: MemberRole
     ) async throws {
-        guard var m = memberships[conversationID]?[userID] else {
+        guard var m = membershipsByConversation[conversationID]?[userID] else {
             throw AegisStoreError.notFound(
                 "membership \(userID) in \(conversationID)")
         }
         m.role = role
         m.updatedAt = Date()
-        memberships[conversationID]?[userID] = m
+        membershipsByConversation[conversationID]?[userID] = m
     }
 
     public func conversations(containing userID: UserID) async throws -> [ConversationID] {
-        memberships.compactMap { conversationID, members in
+        membershipsByConversation.compactMap { conversationID, members in
             members[userID] != nil ? conversationID : nil
         }
     }

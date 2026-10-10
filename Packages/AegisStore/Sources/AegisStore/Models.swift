@@ -68,7 +68,7 @@ extension ID: CodingKeyRepresentable {
     public init?<T: Swift.CodingKey>(codingKey: T) {
         self.rawValue = codingKey.stringValue
     }
-    public var codingKey: AnyStringCodingKey {
+    public var codingKey: any Swift.CodingKey {
         AnyStringCodingKey(stringValue: rawValue)
     }
 }

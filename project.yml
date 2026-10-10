@@ -37,6 +37,7 @@ targets:
       - path: Aegis
         excludes:
           - "INTEGRATION_NOTES.md"
+          - "Info.plist"
           - "**/*.md"
     dependencies:
       - package: AegisCrypto
@@ -61,18 +62,4 @@ targets:
         CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: YES
         ENABLE_APP_TRANSPORT_SECURITY: YES
     info:
-      properties:
-        CFBundleDisplayName: Aegis
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
-        UILaunchScreen: {}
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
-        UIBackgroundModes:
-          - audio # encrypted calls continue in background
-          - fetch # store-and-forward pickup while backgrounded (no APNs by design)
-        NSCameraUsageDescription: "Aegis uses the camera to scan QR codes when adding contacts. Scans are processed on-device and never uploaded."
-        NSMicrophoneUsageDescription: "Aegis uses the microphone for voice notes and end-to-end encrypted voice and video calls."
-        NSPhotoLibraryUsageDescription: "Aegis needs photo library access so you can share photos. Files are encrypted on-device before upload."
-        NSLocalNetworkUsageDescription: "Aegis uses the local network to reach contacts nearby and to sync without the internet in LAN-only mode."
-        NSFaceIDUsageDescription: "Aegis uses Face ID to lock the app. Biometric data never leaves your device."
+      path: Aegis/Info.plist
