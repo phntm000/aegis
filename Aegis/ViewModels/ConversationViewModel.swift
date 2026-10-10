@@ -176,7 +176,7 @@ final class ConversationViewModel: ObservableObject {
         Haptics.impact(.light)
 
         do {
-            let payload = WirePayload.text(
+            var payload = WirePayload.text(
                 id: messageID,
                 body: body,
                 replyToID: replyToID,
@@ -184,6 +184,10 @@ final class ConversationViewModel: ObservableObject {
                 voiceNote: voiceNote,
                 expiresIn: conversation.disappearingInterval
             )
+            // Identity-rotation hint (encrypted): lets the recipient link our
+            // new identity to the previous one and show "safety number
+            // changed" instead of an unknown sender.
+            payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
             let ciphertext = try await crypto.encryptMessage(
                 payload.encoded(),
                 conversationID: conversation.id,
@@ -213,7 +217,7 @@ final class ConversationViewModel: ObservableObject {
         try? await store.updateMessage(retried)
         upsert(retried)
         do {
-            let payload = WirePayload.text(
+            var payload = WirePayload.text(
                 id: retried.id,
                 body: retried.body,
                 replyToID: retried.replyToID,
@@ -221,6 +225,7 @@ final class ConversationViewModel: ObservableObject {
                 voiceNote: retried.voiceNote,
                 expiresIn: conversation.disappearingInterval
             )
+            payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
             let ciphertext = try await crypto.encryptMessage(
                 payload.encoded(),
                 conversationID: conversation.id,

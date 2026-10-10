@@ -27,6 +27,14 @@ enum SettingsKeys {
     /// Last relay URL that verified (handshake probe or live hello).
     /// Automatic mode's only fallback — never a placeholder.
     static let relayLastKnownGoodURL = "relay.lastKnownGoodURL"
+
+    // Identity
+    /// Fingerprint (32 bytes, hex) of the identity this device replaced.
+    /// Included (encrypted) in outbound messages so a contact whose key we
+    /// rotated can link our new identity to the old one and show a
+    /// "safety number changed" prompt instead of an unknown sender.
+    /// It is only a hint — the recipient still verifies out-of-band.
+    static let supersededIdentityFingerprint = "identity.supersededFingerprint"
 }
 
 /// Appearance mode persisted in Settings.

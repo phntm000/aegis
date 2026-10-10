@@ -41,6 +41,14 @@ struct WirePayload: Codable, Sendable {
     // Typing fields
     var isTyping: Bool?
 
+    /// Identity-rotation hint: fingerprint (32 bytes) of the sender's
+    /// previous identity, included (encrypted) when this device replaced its
+    /// identity. Lets the recipient link the new key to the existing contact
+    /// and show "safety number changed" instead of an unknown sender. It is
+    /// only a hint — the recipient still verifies out-of-band before trusting
+    /// the new key.
+    var previousFingerprint: Data?
+
     init(kind: Kind) {
         self.version = Self.currentVersion
         self.kind = kind

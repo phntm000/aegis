@@ -106,6 +106,8 @@ actor MockCrypto: CryptoService {
         throw PreviewServiceError.invalidPayload
     }
 
+    nonisolated func supersededIdentityFingerprint() async -> Data? { nil }
+
     // MARK: Session crypto (NOT real encryption)
 
     func encryptMessage(_ plaintext: Data, conversationID: UUID, recipientKeys: [Data]) async throws -> Data {
@@ -113,10 +115,12 @@ actor MockCrypto: CryptoService {
         Data("MOCK:".utf8) + plaintext
     }
 
-    func decryptMessage(_ ciphertext: Data, conversationID: UUID, senderKey: Data) async throws -> Data {
+    func decryptMessage(_ ciphertext: Data, conversationID: UUID, senderKey: Data) async throws -> (plaintext: Data, senderIdentity: Data) {
         let prefix = Data("MOCK:".utf8)
         guard ciphertext.starts(with: prefix) else { throw PreviewServiceError.invalidPayload }
-        return ciphertext.dropFirst(prefix.count)
+        // PREVIEW ONLY: no real sender authentication; echo senderKey as the
+        // "identity" so preview flows typecheck.
+        return (ciphertext.dropFirst(prefix.count), senderKey)
     }
 
     func encryptAttachment(at fileURL: URL, conversationID: UUID) async throws -> EncryptedFile {
@@ -329,6 +333,12 @@ actor MockTransport: TransportService {
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws {}
     func rotateSenderKey(conversationID: UUID) async throws {}
     func leaveConversation(_ conversationID: UUID) async throws {}
+
+    // MARK: Identity-change tracking (preview: not simulated)
+
+    func noteIdentityChange(_ change: PendingIdentityChange, conversationID: UUID) async {}
+    func resolveIdentityChange(conversationID: UUID, adoptNewKey: Bool) async {}
+    func pendingIdentityChange(for conversationID: UUID) async -> PendingIdentityChange? { nil }
 }
 
 // MARK: - Mock store (in-memory)

@@ -30,6 +30,20 @@ struct OutgoingEnvelope: Sendable, Hashable {
     let kind: EnvelopeKind
 }
 
+/// A message the transport layer already decrypted (unknown-sender prekey
+/// rendezvous): the app must use `plaintext`/`senderIdentity` directly and
+/// MUST NOT decrypt `ciphertext` again (the prekey was consumed).
+struct PreDecryptedEnvelope: Sendable, Hashable {
+    let plaintext: Data
+    /// Serialized `IdentityPublic` of the X3DH-authenticated sender.
+    let senderIdentity: Data
+    /// When the sender hinted a previous identity the recipient knows
+    /// (identity rotation), the superseded fingerprint. The app links this
+    /// message to that contact's conversation and shows the identity-change
+    /// warning. Untrusted metadata — verification is still out-of-band.
+    let supersedesFingerprint: Data?
+}
+
 /// Ciphertext arrived from the network, awaiting decryption by AegisCrypto.
 struct IncomingEnvelope: Sendable, Hashable {
     let id: UUID
@@ -38,6 +52,27 @@ struct IncomingEnvelope: Sendable, Hashable {
     let ciphertext: Data
     let receivedAt: Date
     let kind: EnvelopeKind
+    /// Set only for the unknown-sender rendezvous path (see above).
+    /// When non-nil, `ciphertext` is empty and the app must use this.
+    let preDecrypted: PreDecryptedEnvelope?
+
+    init(
+        id: UUID,
+        conversationID: UUID,
+        senderKey: Data,
+        ciphertext: Data,
+        receivedAt: Date,
+        kind: EnvelopeKind,
+        preDecrypted: PreDecryptedEnvelope? = nil
+    ) {
+        self.id = id
+        self.conversationID = conversationID
+        self.senderKey = senderKey
+        self.ciphertext = ciphertext
+        self.receivedAt = receivedAt
+        self.kind = kind
+        self.preDecrypted = preDecrypted
+    }
 }
 
 struct RelayConfig: Sendable, Codable, Hashable {
@@ -101,6 +136,22 @@ struct GroupEvent: Sendable, Hashable {
     let topic: String?
     /// New value for announcementModeChanged.
     let announcementOnly: Bool?
+}
+
+/// Identity-change state for a 1:1 conversation: the peer's authenticated
+/// messages now come from `newFingerprint`, which differs from the contact's
+/// stored (verified) key. While set, the app shows the "safety number
+/// changed" banner and pauses display of new peer messages until the user
+/// re-verifies (adopting the new key) or explicitly dismisses.
+struct PendingIdentityChange: Sendable, Hashable, Codable {
+    /// Fingerprint of the previously verified identity.
+    let previousFingerprint: Data
+    /// Fingerprint of the new, not-yet-verified identity.
+    let newFingerprint: Data
+    /// Full serialized `IdentityPublic` of the new identity (for the
+    /// re-verification UI).
+    let newIdentityKey: Data
+    let detectedAt: Date
 }
 
 protocol TransportService: Sendable {
@@ -177,4 +228,19 @@ protocol TransportService: Sendable {
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws
     func rotateSenderKey(conversationID: UUID) async throws
     func leaveConversation(_ conversationID: UUID) async throws
+
+    // MARK: Identity-change tracking
+
+    /// Records that a 1:1 conversation's peer presented a new identity.
+    /// Also repoints the conversation's routing to the new identity so
+    /// replies use the fresh session. The app shows the "safety number
+    /// changed" banner and pauses display of new peer messages until
+    /// `resolveIdentityChange` is called.
+    func noteIdentityChange(_ change: PendingIdentityChange, conversationID: UUID) async
+    /// Clears the identity-change state. `adoptNewKey=true` keeps the new
+    /// identity as the peer (the contact record was already updated);
+    /// `false` repoints routing back to the previous identity.
+    func resolveIdentityChange(conversationID: UUID, adoptNewKey: Bool) async
+    /// Current identity-change state for a conversation, if any.
+    func pendingIdentityChange(for conversationID: UUID) async -> PendingIdentityChange?
 }

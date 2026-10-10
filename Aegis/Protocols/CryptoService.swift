@@ -55,6 +55,9 @@ protocol CryptoService: Sendable {
     func inviteCode(for identity: LocalIdentity) async throws -> String
     /// Parse a scanned QR payload or pasted invite code.
     func remoteIdentity(fromInvitePayload payload: String) async throws -> RemoteIdentity
+    /// Fingerprint (32 bytes) of the identity this device replaced, if any —
+    /// sent (encrypted) as a rotation hint so contacts can link the new key.
+    func supersededIdentityFingerprint() async -> Data?
 
     // MARK: Session encryption
 
@@ -67,11 +70,18 @@ protocol CryptoService: Sendable {
     ) async throws -> Data
 
     /// Decrypt an incoming envelope's ciphertext.
+    /// - Returns: the plaintext and the authenticated sender's identity
+    ///   public key (serialized `IdentityPublic`). For 1:1 ratchet messages
+    ///   this is the session's pinned peer; for prekey messages it is the
+    ///   X3DH-authenticated initiator — which may differ from `senderKey`
+    ///   when the sender's identity changed. Callers MUST compare the
+    ///   returned identity against the contact's stored key and surface a
+    ///   mismatch as an identity-change warning.
     func decryptMessage(
         _ ciphertext: Data,
         conversationID: UUID,
         senderKey: Data
-    ) async throws -> Data
+    ) async throws -> (plaintext: Data, senderIdentity: Data)
 
     // MARK: Attachments
 

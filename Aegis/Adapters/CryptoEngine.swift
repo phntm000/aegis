@@ -233,6 +233,13 @@ actor CryptoEngine {
     }
 
     func deleteIdentity() async throws {
+        // Remember the retired fingerprint so our first messages from the
+        // replacement identity can hint the rotation to contacts (they show
+        // "safety number changed" instead of an unknown sender). The hint is
+        // untrusted metadata — recipients still verify out-of-band.
+        if let old = identity {
+            UserDefaults.standard.set(old.fingerprint.hexString, forKey: SettingsKeys.supersededIdentityFingerprint)
+        }
         try KeychainHelper.delete(service: "app.aegis.identity", account: "primary")
         identity = nil
         preKeyManager = nil
@@ -243,6 +250,22 @@ actor CryptoEngine {
         sessionFlushTask?.cancel()
         sessionFlushTask = nil
         await sessionPersistence?.deleteAll()
+    }
+
+    /// Fingerprint of the identity this device replaced, if any. Included
+    /// (inside the encrypted payload) in outbound messages as a rotation
+    /// hint for contacts.
+    var supersededIdentityFingerprint: Data? {
+        guard let hex = UserDefaults.standard.string(forKey: SettingsKeys.supersededIdentityFingerprint),
+              let data = Data(hexString: hex), data.count == 32
+        else { return nil }
+        return data
+    }
+
+    /// Clears the rotation hint (e.g. after the user confirms all contacts
+    /// migrated, or from Settings).
+    func clearSupersededIdentityFingerprint() {
+        UserDefaults.standard.removeObject(forKey: SettingsKeys.supersededIdentityFingerprint)
     }
 
     // MARK: - Invites
@@ -326,7 +349,14 @@ actor CryptoEngine {
 
     /// Decrypts an inbound 1:1 payload from a known peer. Handles the sealed
     /// layer, session initiation (0x02), and ratchet messages (0x01).
-    func decryptDirect(_ payload: Data, from peer: IdentityPublic) throws -> Data {
+    ///
+    /// Returns the plaintext and the authenticated sender identity. For
+    /// ratchet messages this is the session's pinned peer; for prekey
+    /// messages it is the X3DH-authenticated initiator — which may differ
+    /// from `peer` when the peer's identity changed. Callers MUST compare
+    /// `sender` against the expected contact key and surface a mismatch
+    /// (identity-change warning), never silently re-pin.
+    func decryptDirect(_ payload: Data, from peer: IdentityPublic) throws -> (plaintext: Data, sender: IdentityPublic) {
         guard let identity else { throw CryptoEngineError.unknownSession }
         let key = peer.fingerprint.hexString
         // Sealed envelopes are detected by try-parse (see maybeOpen); the
@@ -337,13 +367,68 @@ actor CryptoEngine {
         return try decryptInner(payload, peer: peer, key: key)
     }
 
-    private func decryptWithSession(_ inner: Data, entry: SessionEntry) throws -> Data {
+    /// Decrypts a prekey message from a sender we have no session with and
+    /// cannot resolve yet — the identity-route rendezvous for first contact
+    /// or a contact whose identity changed. Sealed envelopes are opened
+    /// anonymously; the certificate's claimed fingerprint MUST equal the
+    /// prekey's X3DH-authenticated sender identity, and the exchange fails
+    /// closed otherwise. Returns the plaintext and the authenticated
+    /// initiator identity, and installs the new session so subsequent
+    /// messages (and our replies) use it.
+    func decryptPreKeyFromUnknownSender(_ payload: Data) throws -> (plaintext: Data, initiator: IdentityPublic) {
+        guard let identity, let manager = preKeyManager else { throw CryptoEngineError.unknownSession }
+        let inner: Data
+        let claimedFingerprint: Data?
+        if let envelope = try? SealedEnvelope.parse(payload) {
+            let opened = try SealedSender.openAnonymous(envelope, recipient: identity)
+            inner = opened.innerMessage
+            claimedFingerprint = opened.senderFingerprint
+        } else {
+            inner = payload
+            claimedFingerprint = nil
+        }
+        guard inner.count >= 2,
+              inner[0] == AegisCrypto.protocolVersion,
+              inner[1] == InnerWireType.preKeyMessage.rawValue
+        else { throw AegisCryptoError.invalidWireFormat }
+        let message = try PreKeyMessage.parse(inner)
+        if let claimed = claimedFingerprint {
+            // The sealed certificate's fingerprint must be the same identity
+            // the X3DH message authenticates — otherwise anyone could claim
+            // to be anyone.
+            guard constantTimeEqual(claimed, message.senderIdentity.fingerprint) else {
+                throw AegisCryptoError.invalidSignature
+            }
+        }
+        let opk = manager.consumeOneTimePreKey(message.usedOneTimePreKeyID)
+        let responded = try SessionEstablishment.respond(
+            preKeyMessageWire: inner,
+            ourIdentity: identity,
+            ourSignedPreKey: manager.signedPreKey,
+            usedOneTimePreKey: opk
+        )
+        // Successful X3DH authenticates message.senderIdentity: the KDF
+        // binds the initiator's identity key, so a forged claim fails the
+        // AEAD decrypt above.
+        let initiator = message.senderIdentity
+        let ikey = initiator.fingerprint.hexString
+        sessions[ikey] = SessionEntry(
+            ratchet: responded.session,
+            peer: initiator,
+            ephemeralPublicKey: message.ephemeralPublicKey
+        )
+        knownIdentities[ikey] = initiator
+        markSessionDirty(ikey)
+        return (responded.plaintext, initiator)
+    }
+
+    private func decryptWithSession(_ inner: Data, entry: SessionEntry) throws -> (plaintext: Data, sender: IdentityPublic) {
         var mutable = entry
         let message = try RatchetMessage.parse(inner)
         let plaintext = try mutable.ratchet.decrypt(message, associatedData: Data())
         sessions[entry.peer.fingerprint.hexString] = mutable
         markSessionDirty(entry.peer.fingerprint.hexString)
-        return plaintext
+        return (plaintext, entry.peer)
     }
 
     // MARK: - Sealed sender (toggle honored here)
@@ -386,7 +471,9 @@ actor CryptoEngine {
     }
 
     /// Dispatches a session-layer inner message (post sealed-open).
-    private func decryptInner(_ inner: Data, peer: IdentityPublic, key: String) throws -> Data {
+    /// Returns the plaintext and the authenticated sender: the session peer
+    /// for ratchet messages, the X3DH-authenticated initiator for prekeys.
+    private func decryptInner(_ inner: Data, peer: IdentityPublic, key: String) throws -> (plaintext: Data, sender: IdentityPublic) {
         guard inner.count >= 2,
               inner[0] == AegisCrypto.protocolVersion,
               let identity = identity, let manager = preKeyManager
@@ -409,7 +496,7 @@ actor CryptoEngine {
                     ourSignedPreKey: manager.signedPreKey,
                     usedOneTimePreKey: opk
                 )
-                return oneShot.plaintext
+                return (oneShot.plaintext, peer)
             }
             let responded = try SessionEstablishment.respond(
                 preKeyMessageWire: inner,
@@ -417,13 +504,21 @@ actor CryptoEngine {
                 ourSignedPreKey: manager.signedPreKey,
                 usedOneTimePreKey: opk
             )
-            sessions[key] = SessionEntry(
+            // The initiator is X3DH-authenticated (the KDF binds their
+            // identity key): this is the identity the message REALLY came
+            // from, which may differ from the expected `peer` when the
+            // peer's identity changed. Key the session by the initiator —
+            // never silently re-pin a changed identity onto the old key.
+            let initiator = message.senderIdentity
+            let ikey = initiator.fingerprint.hexString
+            sessions[ikey] = SessionEntry(
                 ratchet: responded.session,
-                peer: peer,
+                peer: initiator,
                 ephemeralPublicKey: message.ephemeralPublicKey
             )
-            markSessionDirty(key)
-            return responded.plaintext
+            knownIdentities[ikey] = initiator
+            markSessionDirty(ikey)
+            return (responded.plaintext, initiator)
         case InnerWireType.ratchetMessage.rawValue:
             guard let entry = sessions[key] else { throw CryptoEngineError.unknownSession }
             return try decryptWithSession(inner, entry: entry)
@@ -575,7 +670,7 @@ actor CryptoEngine {
         if let groupID {
             raw = try decryptGroup(wrapped, groupID: groupID)
         } else if let peer {
-            raw = try decryptDirect(wrapped, from: peer)
+            raw = try decryptDirect(wrapped, from: peer).plaintext
         } else {
             throw CryptoEngineError.unknownSession
         }

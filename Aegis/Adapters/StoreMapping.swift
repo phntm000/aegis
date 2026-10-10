@@ -49,6 +49,9 @@ struct ConversationSidecar: Codable, Sendable {
     var cryptoGroupID: Data?
     /// 32-byte peer fingerprint for DMs.
     var dmPeerFingerprint: Data?
+    /// Set while the peer's identity change is unverified: the app banners
+    /// and pauses display of new peer messages until resolved.
+    var pendingIdentityChange: PendingIdentityChange?
     /// Voice-note UI metadata keyed by attachment UUID string.
     var voiceNoteExtras: [String: VoiceNoteExtra]?
 

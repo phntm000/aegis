@@ -93,6 +93,10 @@ struct LiveCryptoService: CryptoService {
         return RemoteIdentity(displayName: name, publicKey: pub.serialized())
     }
 
+    func supersededIdentityFingerprint() async -> Data? {
+        await engine.supersededIdentityFingerprint
+    }
+
     // MARK: Session encryption
 
     func encryptMessage(
@@ -129,22 +133,30 @@ struct LiveCryptoService: CryptoService {
         _ ciphertext: Data,
         conversationID: UUID,
         senderKey: Data
-    ) async throws -> Data {
+    ) async throws -> (plaintext: Data, senderIdentity: Data) {
         let sidecar = await core.sidecars.load(id: conversationID)
         if let groupID = sidecar.cryptoGroupID {
             let plaintext = try await engine.decryptGroup(ciphertext, groupID: groupID)
             // Group plaintext is a GroupInnerPayload; the app wants the body.
+            // The sender is the group message's sender fingerprint.
+            let sender: Data
+            if let groupMessage = try? GroupMessage.parse(ciphertext) {
+                sender = groupMessage.senderID
+            } else {
+                sender = senderKey
+            }
             if let inner = try? JSONDecoder().decode(GroupInnerPayload.self, from: plaintext),
                inner.kind == "message"
             {
-                return inner.body
+                return (inner.body, sender)
             }
-            return plaintext
+            return (plaintext, sender)
         }
         guard let peer = await engine.identityPublic(forFingerprint: senderKey) else {
             throw CryptoEngineError.unknownSession
         }
-        return try await engine.decryptDirect(ciphertext, from: peer)
+        let (plaintext, sender) = try await engine.decryptDirect(ciphertext, from: peer)
+        return (plaintext, sender.serialized())
     }
 
     // MARK: Attachments
@@ -486,6 +498,20 @@ struct LiveTransportService: TransportService {
         }
         try await core.pkgStore.conversations.delete(id: packageID(conversationID))
         await core.sidecars.delete(id: conversationID)
+    }
+
+    // MARK: Identity-change tracking
+
+    func noteIdentityChange(_ change: PendingIdentityChange, conversationID: UUID) async {
+        await core.noteIdentityChange(change, conversationID: conversationID)
+    }
+
+    func resolveIdentityChange(conversationID: UUID, adoptNewKey: Bool) async {
+        await core.resolveIdentityChange(conversationID: conversationID, adoptNewKey: adoptNewKey)
+    }
+
+    func pendingIdentityChange(for conversationID: UUID) async -> PendingIdentityChange? {
+        await core.pendingIdentityChange(for: conversationID)
     }
 
     // MARK: - Private

@@ -1,3 +1,4 @@
+import AegisCrypto
 import Combine
 import Foundation
 import UIKit
@@ -167,17 +168,54 @@ final class AppState: ObservableObject {
 
     private func handleIncoming(_ envelope: IncomingEnvelope) async {
         do {
-            let plaintext = try await crypto.decryptMessage(
-                envelope.ciphertext,
+            let plaintext: Data
+            let senderIdentity: Data
+            if let pre = envelope.preDecrypted {
+                // Unknown-sender rendezvous: the transport already decrypted
+                // and X3DH-authenticated the sender. Never decrypt twice —
+                // the prekey was consumed.
+                plaintext = pre.plaintext
+                senderIdentity = pre.senderIdentity
+            } else {
+                let decrypted = try await crypto.decryptMessage(
+                    envelope.ciphertext,
+                    conversationID: envelope.conversationID,
+                    senderKey: envelope.senderKey
+                )
+                plaintext = decrypted.plaintext
+                senderIdentity = decrypted.senderIdentity
+            }
+            // Identity-change detection runs BEFORE any message processing:
+            // when the authenticated sender differs from the contact's
+            // stored key, the message is held and the user is warned.
+            if await handleIdentityChangeIfNeeded(
+                senderIdentity: senderIdentity,
+                expectedFingerprint: envelope.senderKey,
                 conversationID: envelope.conversationID,
-                senderKey: envelope.senderKey
-            )
+                supersedes: envelope.preDecrypted?.supersedesFingerprint,
+                receivedAt: envelope.receivedAt
+            ) {
+                return
+            }
+            // While an identity change is pending for this conversation, new
+            // peer messages are held (saved, but not displayed or notified)
+            // until the user re-verifies or explicitly dismisses.
+            if await isIdentityChangePending(for: envelope.conversationID, senderIdentity: senderIdentity) {
+                await holdMessageForIdentityChange(
+                    plaintext: plaintext,
+                    envelope: envelope
+                )
+                return
+            }
             let payload = try WirePayload.decoded(from: plaintext)
+            // Full serialized identity when the decrypt layer authenticated
+            // one (65 bytes); nil for group sender fingerprints.
+            let fullSenderIdentity = senderIdentity.count == 65 ? senderIdentity : nil
             switch payload.kind {
             case .text:
-                await handleIncomingText(payload, envelope: envelope)
+                await handleIncomingText(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .reaction:
-                await handleIncomingReaction(payload, envelope: envelope)
+                await handleIncomingReaction(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .edit:
                 await handleIncomingEdit(payload)
             case .delete:
@@ -185,9 +223,9 @@ final class AppState: ObservableObject {
             case .readReceipt:
                 await handleIncomingReadReceipt(payload, from: envelope.senderKey)
             case .typing:
-                await handleIncomingTyping(payload, envelope: envelope)
+                await handleIncomingTyping(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .screenshotNotice:
-                await handleIncomingScreenshotNotice(envelope: envelope)
+                await handleIncomingScreenshotNotice(envelope: envelope, senderIdentity: fullSenderIdentity)
             }
         } catch {
             // Corrupt or undecryptable envelope: drop it loudly in debug, silently
@@ -198,9 +236,127 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func handleIncomingText(_ payload: WirePayload, envelope: IncomingEnvelope) async {
+    // MARK: - Identity-change detection
+
+    /// Checks the authenticated sender against the conversation contact's
+    /// stored key. Returns true when the message was consumed by
+    /// identity-change handling: the contact is flagged `.identityChanged`,
+    /// the conversation shows the "safety number changed" banner, and the
+    /// message is held (not displayed) until the user re-verifies or
+    /// explicitly dismisses.
+    ///
+    /// The `supersedes` hint (from the unknown-sender rendezvous path) links
+    /// a new identity to an existing contact. Without it, an unknown sender
+    /// is just an unknown sender — never attributed to a contact.
+    private func handleIdentityChangeIfNeeded(
+        senderIdentity: Data,
+        expectedFingerprint: Data,
+        conversationID: UUID,
+        supersedes: Data?,
+        receivedAt: Date
+    ) async -> Bool {
+        guard let senderFP = Self.fingerprint(ofSerializedIdentity: senderIdentity) else { return false }
+        // 1:1 only: safety numbers are a 1:1 concept. Group membership
+        // changes go through the group invite/distribution flow.
+        guard let conversation = try? await store.fetchConversation(id: conversationID),
+              conversation.kind == .direct
+        else { return false }
+        // Already flagged for this exact new identity: not a new change —
+        // the pending check below holds the message.
+        if let pending = await transport.pendingIdentityChange(for: conversationID),
+           pending.newFingerprint == senderFP
+        {
+            return false
+        }
+        // The contact this conversation belongs to: the hinted previous
+        // identity when the sender rotated, else the expected route peer
+        // (covers prekeys arriving on an established peer's route).
+        let contactFP = supersedes ?? expectedFingerprint
+        guard let contact = await contactForFingerprint(contactFP),
+              let storedFP = Self.fingerprint(ofSerializedIdentity: contact.identityKey),
+              storedFP != senderFP
+        else { return false }
+        // The authenticated sender differs from the contact's stored key:
+        // flag the contact, banner the conversation, and hold the message.
+        var updated = contact
+        updated.verification = .identityChanged
+        try? await store.saveContact(updated)
+        await transport.noteIdentityChange(
+            PendingIdentityChange(
+                previousFingerprint: storedFP,
+                newFingerprint: senderFP,
+                newIdentityKey: senderIdentity,
+                detectedAt: receivedAt
+            ),
+            conversationID: conversationID
+        )
+        await insertNotice(
+            conversationID: conversationID,
+            text: "Safety number changed — tap to re-verify"
+        )
+        Haptics.notification(.warning)
+        return true
+    }
+
+    /// Whether display is currently paused for this conversation: a pending
+    /// identity change whose new identity matches the sender.
+    private func isIdentityChangePending(for conversationID: UUID, senderIdentity: Data) async -> Bool {
+        guard let senderFP = Self.fingerprint(ofSerializedIdentity: senderIdentity),
+              let pending = await transport.pendingIdentityChange(for: conversationID)
+        else { return false }
+        return pending.newFingerprint == senderFP
+    }
+
+    /// Saves a message that arrived while its sender's identity change is
+    /// unverified. It is stored (never lost) but not displayed, notified,
+    /// or counted as unread until the user re-verifies or dismisses.
+    private func holdMessageForIdentityChange(
+        plaintext: Data,
+        envelope: IncomingEnvelope
+    ) async {
+        guard let payload = try? WirePayload.decoded(from: plaintext),
+              payload.kind == .text,
+              var conversation = try? await store.fetchConversation(id: envelope.conversationID),
+              let pending = await transport.pendingIdentityChange(for: envelope.conversationID),
+              let contact = await contactForFingerprint(pending.previousFingerprint)
+        else { return }
+        let message = Message(
+            conversationID: conversation.id,
+            senderID: contact.id,
+            isFromMe: false,
+            body: payload.body,
+            replyToID: payload.replyToID,
+            status: .delivered,
+            sentAt: envelope.receivedAt
+        )
+        try? await store.saveMessage(message)
+        // Deliberately: no inboundSubject, no notification, no unread bump.
+        // The banner is the signal; the messages appear on resolve.
+        conversation.lastMessageAt = message.sentAt
+        try? await store.saveConversation(conversation)
+    }
+
+    /// Fingerprint of a serialized `IdentityPublic` (65 bytes). Nil when the
+    /// data is not a valid serialized identity.
+    private static func fingerprint(ofSerializedIdentity data: Data) -> Data? {
+        guard let pub = try? IdentityPublic(serialized: data) else { return nil }
+        return pub.fingerprint
+    }
+
+    /// Finds a contact by identity fingerprint. `Contact.identityKey` is the
+    /// 65-byte serialized public key; the lookup compares fingerprints (and
+    /// also matches legacy placeholders that stored a bare fingerprint).
+    private func contactForFingerprint(_ fingerprint: Data) async -> Contact? {
+        let contacts = (try? await store.fetchContacts()) ?? []
+        return contacts.first {
+            Self.fingerprint(ofSerializedIdentity: $0.identityKey) == fingerprint
+                || $0.identityKey == fingerprint
+        }
+    }
+
+    private func handleIncomingText(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard var conversation = try? await store.fetchConversation(id: envelope.conversationID) else { return }
-        let contact = await resolveContact(for: envelope.senderKey)
+        let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         let expiresAt = payload.expiresIn.map { Date().addingTimeInterval($0) }
 
         let message = Message(
@@ -238,9 +394,9 @@ final class AppState: ObservableObject {
         Haptics.impact(.light)
     }
 
-    private func handleIncomingReaction(_ payload: WirePayload, envelope: IncomingEnvelope) async {
+    private func handleIncomingReaction(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard let target = payload.targetMessageID, let emoji = payload.emoji else { return }
-        let reactor = await resolveContact(for: envelope.senderKey)
+        let reactor = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         let conversations = (try? await store.fetchConversations()) ?? []
         for conversation in conversations {
             let messages = (try? await store.fetchMessages(conversationID: conversation.id, limit: 200, before: nil)) ?? []
@@ -298,8 +454,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func handleIncomingTyping(_ payload: WirePayload, envelope: IncomingEnvelope) async {
-        let contact = await resolveContact(for: envelope.senderKey)
+    private func handleIncomingTyping(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         typingSubject.send(TypingEvent(
             conversationID: envelope.conversationID,
             contactID: contact.id,
@@ -308,8 +464,8 @@ final class AppState: ObservableObject {
         ))
     }
 
-    private func handleIncomingScreenshotNotice(envelope: IncomingEnvelope) async {
-        let contact = await resolveContact(for: envelope.senderKey)
+    private func handleIncomingScreenshotNotice(envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         await insertNotice(
             conversationID: envelope.conversationID,
             text: "\(contact.displayName) took a screenshot"
@@ -325,17 +481,20 @@ final class AppState: ObservableObject {
 
     // MARK: - Helpers
 
-    /// Find the contact for an identity key, creating an unverified placeholder
+    /// Find the contact for an identity, creating an unverified placeholder
     /// for unknown senders rather than dropping their messages.
-    private func resolveContact(for identityKey: Data) async -> Contact {
-        let contacts = (try? await store.fetchContacts()) ?? []
-        if let existing = contacts.first(where: { $0.identityKey == identityKey }) {
+    /// `fingerprint` is the 32-byte identity fingerprint; `fullIdentity` is
+    /// the 65-byte serialized public key when known (pre-decrypted
+    /// rendezvous). Contacts are matched by fingerprint — `Contact.identityKey`
+    /// is the full serialized key, which never equals a bare fingerprint.
+    private func resolveContact(for fingerprint: Data, fullIdentity: Data? = nil) async -> Contact {
+        if let existing = await contactForFingerprint(fingerprint) {
             return existing
         }
         // Unknown sender: create a placeholder the user can rename / verify / block.
         let placeholder = Contact(
             displayName: "Unknown contact",
-            identityKey: identityKey,
+            identityKey: fullIdentity ?? fingerprint,
             verification: .unverified
         )
         try? await store.saveContact(placeholder)

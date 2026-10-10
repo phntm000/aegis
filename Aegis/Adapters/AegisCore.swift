@@ -504,10 +504,17 @@ actor AegisCore {
     }
 
     private func handleDirectFrame(frame: AegisFrame, peerFingerprint: Data) async throws {
-        guard let peer = await engine.identityPublic(forFingerprint: peerFingerprint) else { return }
+        guard let peer = await engine.identityPublic(forFingerprint: peerFingerprint) else {
+            // No known identity for this route's peer. The only legitimate
+            // case is our own identity route: a prekey rendezvous from a
+            // sender we have never met (first contact) or whose identity
+            // changed (reinstall). Anything else is dropped.
+            try await handleUnknownSenderFrame(frame: frame, routeFingerprint: peerFingerprint)
+            return
+        }
         if frame.flags & AegisFrame.flagTransportControl != 0 {
             // Transport-internal: the core consumes it fully.
-            let plaintext = try await engine.decryptDirect(frame.payload, from: peer)
+            let plaintext = try await engine.decryptDirect(frame.payload, from: peer).plaintext
             // Distributions are detected by parse (the engine sends them
             // as encryptDirect(distribution.serialized()) with no JSON
             // wrapper); everything else is a TransportControl envelope.
@@ -537,6 +544,112 @@ actor AegisCore {
             receivedAt: Date(),
             kind: frame.flags & AegisFrame.flagKnock != 0 ? .callSignal : .message
         ))
+    }
+
+    /// Handles a frame on a route whose peer we cannot resolve. The only
+    /// legitimate case is our own identity route: a prekey rendezvous from a
+    /// sender we have never met (first contact) or whose identity changed
+    /// (reinstall). Transport-control frames from unknown senders are
+    /// dropped — only user messages are surfaced, and the app (never the
+    /// transport) decides what they mean.
+    ///
+    /// NOTE (documented layering exception): this path must decrypt, because
+    /// no session exists yet. The core extracts exactly one routing field
+    /// from the plaintext — the sender's rotation hint (`previousFingerprint`)
+    /// — to link the message to an existing conversation when the sender
+    /// replaced their identity. Everything else travels opaquely to the app
+    /// via `preDecrypted`.
+    private func handleUnknownSenderFrame(frame: AegisFrame, routeFingerprint: Data) async throws {
+        guard frame.flags & AegisFrame.flagTransportControl == 0,
+              frame.flags & AegisFrame.flagKnock == 0,
+              let local = try? await engine.localPublicIdentity(),
+              routeFingerprint == local.fingerprint
+        else { return }
+        let (plaintext, initiator) = try await engine.decryptPreKeyFromUnknownSender(frame.payload)
+        let initiatorFP = initiator.fingerprint
+        // Cache the initiator's key so the identity resolves going forward.
+        try? await keyDirectory.store(fingerprintHex: initiatorFP.hexString, identityPublic: initiator.serialized())
+        // Bind the session route so replies and follow-up messages use it.
+        try await bindDirect(peer: initiator)
+        // Link to an existing conversation when the sender hints a previous
+        // identity we know. The hint is untrusted metadata — the app still
+        // requires out-of-band verification before trusting the new key.
+        let conversationID: UUID
+        var supersedes: Data? = nil
+        if let previous = Self.rotationHint(in: plaintext),
+           await isKnownContact(fingerprint: previous)
+        {
+            conversationID = try await directConversationID(for: previous)
+            supersedes = previous
+        } else {
+            conversationID = try await directConversationID(for: initiatorFP)
+        }
+        envelopeCont.yield(IncomingEnvelope(
+            id: UUID(),
+            conversationID: conversationID,
+            senderKey: initiatorFP,
+            ciphertext: Data(),
+            receivedAt: Date(),
+            kind: .message,
+            preDecrypted: PreDecryptedEnvelope(
+                plaintext: plaintext,
+                senderIdentity: initiator.serialized(),
+                supersedesFingerprint: supersedes
+            )
+        ))
+    }
+
+    /// Extracts the sender's rotation hint from a decrypted payload, if any.
+    private static func rotationHint(in plaintext: Data) -> Data? {
+        guard let payload = try? WirePayload.decoded(from: plaintext),
+              let hint = payload.previousFingerprint,
+              hint.count == 32
+        else { return nil }
+        return hint
+    }
+
+    /// Whether a fingerprint belongs to a known contact (store-backed).
+    private func isKnownContact(fingerprint: Data) async -> Bool {
+        let hex = fingerprint.hexString
+        let contacts = (try? await pkgStore.contacts.list(includeBlocked: true)) ?? []
+        return contacts.contains { $0.identityKeyFingerprint == hex }
+    }
+
+    // MARK: - Identity-change tracking (TransportService)
+
+    /// Records a peer identity change: repoints the conversation's routing
+    /// to the new identity (replies must use the fresh session — the old
+    /// identity can no longer decrypt) and stores the pending state the app
+    /// banners on.
+    func noteIdentityChange(_ change: PendingIdentityChange, conversationID: UUID) async {
+        var sidecar = await sidecars.load(id: conversationID)
+        sidecar.dmPeerFingerprint = change.newFingerprint
+        sidecar.pendingIdentityChange = change
+        try? await sidecars.save(id: conversationID, sidecar: sidecar)
+        if let peer = await engine.identityPublic(forFingerprint: change.newFingerprint) {
+            try? await bindDirect(peer: peer)
+        }
+    }
+
+    /// Clears the identity-change state after the user re-verified (adopting
+    /// the new key) or explicitly dismissed (keeping the old key on the
+    /// contact). With `adoptNewKey=false` routing returns to the previous
+    /// identity; the contact stays flagged until re-verified.
+    func resolveIdentityChange(conversationID: UUID, adoptNewKey: Bool) async {
+        var sidecar = await sidecars.load(id: conversationID)
+        guard let change = sidecar.pendingIdentityChange else { return }
+        if !adoptNewKey {
+            sidecar.dmPeerFingerprint = change.previousFingerprint
+            if let peer = await engine.identityPublic(forFingerprint: change.previousFingerprint) {
+                try? await bindDirect(peer: peer)
+            }
+        }
+        sidecar.pendingIdentityChange = nil
+        try? await sidecars.save(id: conversationID, sidecar: sidecar)
+    }
+
+    func pendingIdentityChange(for conversationID: UUID) async -> PendingIdentityChange? {
+        await sidecars.load(id: conversationID).pendingIdentityChange
     }
 
     private func handleTransportControl(_ control: TransportControl, from peer: IdentityPublic) async throws {
