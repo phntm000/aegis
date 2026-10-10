@@ -46,8 +46,11 @@ final class RemoteVideoUIView: UIView, VideoSink {
         displayLayer.frame = bounds
     }
 
-    func renderRemoteFrame(_ sampleBuffer: CMSampleBuffer, forCall callID: UUID) {
-        DispatchQueue.main.async { [weak self] in
+    /// Main-actor hop is inside: the VideoSink contract delivers frames on an
+    /// arbitrary queue and requires the sink to reach the main thread
+    /// itself, so this witness is `nonisolated` and hops explicitly.
+    nonisolated func renderRemoteFrame(_ sampleBuffer: CMSampleBuffer, forCall callID: UUID) {
+        Task { [weak self] @MainActor in
             guard let self else { return }
             if self.displayLayer.status == .failed {
                 // A failed layer never recovers; rebuild it so video

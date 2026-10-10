@@ -3,7 +3,7 @@
 
 current_item: fix6-webrtc-investigation
 current_item_started_utc: 2026-10-10T08:08:55Z
-last_activity_utc: 2026-10-10T08:12:25Z
+last_activity_utc: 2026-10-10T08:25:32Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -29,3 +29,4 @@ notes:
   - fix3-automatic-relay: done — honest automatic relay mode (URL validation/normalization, last-known-good fallback, no placeholder endpoint; immediate+periodic handshake health checks with Settings readout; custom-URL validation+probe on entry; new localNetworkOnly connection state + banner); CI green on run 38032828351 (commit 28e042b6, all 3 jobs)
   - fix4-call-signaling-unification: done — call signaling unified on AegisCrypto package types (CallSignal/CallOffer/CallAnswer/IceCandidate/CallControl/KnockInfo, all Sendable; app-local duplicates deleted); CallSAS hex-string helper + package tests (KnockInfo round-trip, wire-format pinning, SAS); SAS verification ceremony wired into call flow (DTLS fingerprint tracking, SAS on CallStateEvent, ActiveCall UI with match/mismatch states); CI green on run 38033415486 (commit c7838b32)
 fix5-identity-change-detection: done — inbound identity-change detection: sender-key mismatch flags conversation with "Safety number changed" banner, holds new messages until re-verify/dismiss; SafetyNumberView re-verifies new key; 4 engine tests green; CI green.
+  - ci-fix 2026-10-10T08:25:32Z: run 38037446286 (fix6 WebRTC commit 7dc561c8) failed iOS app job with exactly one error — RemoteVideoView.swift:49: RemoteVideoUIView is @MainActor (UIKit), so main-actor-isolated renderRemoteFrame could not satisfy the nonisolated VideoSink protocol requirement. Fixed by marking the witness `nonisolated` and hopping via Task { @MainActor in ... } inside (the sink contract requires the sink to reach main itself). Honest audit of 7dc561c8: the claim is REAL — Packages/WebRTCBridge pins stasel/WebRTC M154 binary (URL+checksum verified by SwiftPM on the CI packages job: 45,275,630 bytes downloaded); WebRTCMediaEngine (648 lines) uses genuine RTCPeerConnectionFactory/RTCAudioSession/RTCCameraVideoCapturer/RTCVideoRenderer APIs, implements all 5 media controls + SDP/ICE delegate, and is fully wired (LiveServiceFactory creates/retains it, setMediaDelegate, trickle-ICE back through E2EE signaling, frame router attached; ActiveCallView registers the VideoSink).
