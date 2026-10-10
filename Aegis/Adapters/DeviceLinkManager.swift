@@ -98,16 +98,20 @@ actor DeviceLinkManager {
         self.syncEventCont = syncCont
         // Re-bind the paired mailbox on launch so a linked device keeps
         // receiving after restart (keys live in the keychain).
-        let devices = self.linkedDevices
         Task { [weak self] in
-            guard let self else { return }
-            for device in devices {
-                if let key = await self.loadPairedKey(for: device.deviceID) {
-                    await self.core?.bindDeviceLinkMailbox(
-                        Self.pairedMailbox(channelKey: key),
-                        channel: .paired
-                    )
-                }
+            await self?.rebindPairedMailboxes()
+        }
+    }
+
+    /// Re-binds every known paired-channel mailbox. Actor-isolated so the
+    /// non-Sendable channel keys never cross an actor boundary.
+    private func rebindPairedMailboxes() async {
+        for device in linkedDevices {
+            if let key = loadPairedKey(for: device.deviceID) {
+                await core?.bindDeviceLinkMailbox(
+                    Self.pairedMailbox(channelKey: key),
+                    channel: .paired
+                )
             }
         }
     }
