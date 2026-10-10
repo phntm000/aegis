@@ -34,28 +34,28 @@ struct ChatListView: View {
                 ArchivedChatsView(viewModel: viewModel, navigationPath: $navigationPath)
             }
             .sheet(isPresented: $showingNewGroup) {
-                NewGroupView(appState: appState) { conversation in
+                NewGroupView(onCreated: { conversation in
                     Task { @MainActor in
                         await viewModel.load()
                         navigationPath.append(conversation)
                     }
-                }
+                })
             }
             .sheet(isPresented: $showingNewChannel) {
-                NewChannelView(appState: appState) { conversation in
+                NewChannelView(onCreated: { conversation in
                     Task { @MainActor in
                         await viewModel.load()
                         navigationPath.append(conversation)
                     }
-                }
+                })
             }
             .sheet(isPresented: $showingAddContact) {
-                AddContactView(appState: appState) { conversation in
+                AddContactView(appState: appState, onAdded: { conversation in
                     Task { @MainActor in
                         await viewModel.load()
                         if let conversation { navigationPath.append(conversation) }
                     }
-                }
+                })
             }
             .confirmationDialog(
                 "Delete this conversation?",
@@ -88,6 +88,7 @@ struct ChatListView: View {
 
     // MARK: - List
 
+    @MainActor
     private var mainContent: some View {
         VStack(spacing: 0) {
             ConnectionBannerView()
@@ -95,6 +96,7 @@ struct ChatListView: View {
         }
     }
 
+    @MainActor
     private var listStateContent: some View {
         Group {
             if viewModel.isLoading {
