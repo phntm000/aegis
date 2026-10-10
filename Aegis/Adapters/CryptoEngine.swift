@@ -94,9 +94,9 @@ actor CryptoEngine {
 
     var hasIdentity: Bool { identity != nil }
 
-    func loadIdentity() throws -> (Identity, String) {
+    func loadIdentity() throws -> (IdentityPublic, String, Date) {
         guard let identity else { throw CryptoEngineError.unknownSession }
-        return (identity, localDisplayName)
+        return (identity.publicView, localDisplayName, identity.createdAt)
     }
 
     /// Creates a fresh identity, persists private material to the Keychain
@@ -446,26 +446,28 @@ actor CryptoEngine {
 
     // MARK: - Attachments
 
-    func makeFileKey() throws -> SymmetricKey {
-        try AttachmentCrypto.generateFileKey()
+    /// Returns the raw 32 bytes; callers wrap in `SymmetricKey` locally.
+    /// (`SymmetricKey` is not Sendable, so it must not cross the actor boundary.)
+    func makeFileKey() throws -> Data {
+        try AttachmentCrypto.generateFileKey().withUnsafeBytes { Data($0) }
     }
 
     /// Wraps a file key for the conversation: the wrapped bytes travel in
     /// the message envelope (`wrappedKey`). For groups the wrap goes
     /// through the sender-key session; for 1:1 through the ratchet.
-    func wrapFileKey(_ key: SymmetricKey, groupID: Data?, peer: IdentityPublic?) throws -> Data {
-        let raw = key.withUnsafeBytes { Data($0) }
+    func wrapFileKey(_ keyData: Data, groupID: Data?, peer: IdentityPublic?) throws -> Data {
+        guard keyData.count == 32 else { throw AegisCryptoError.invalidKeyData }
         if let groupID {
-            let (wire, _) = try encryptGroup(raw, groupID: groupID)
+            let (wire, _) = try encryptGroup(keyData, groupID: groupID)
             return wire
         } else if let peer {
-            let (wire, _) = try encryptDirect(raw, to: peer)
+            let (wire, _) = try encryptDirect(keyData, to: peer)
             return wire
         }
         throw CryptoEngineError.unknownSession
     }
 
-    func unwrapFileKey(_ wrapped: Data, groupID: Data?, peer: IdentityPublic?) async throws -> SymmetricKey {
+    func unwrapFileKey(_ wrapped: Data, groupID: Data?, peer: IdentityPublic?) async throws -> Data {
         let raw: Data
         if let groupID {
             raw = try decryptGroup(wrapped, groupID: groupID)
@@ -475,7 +477,7 @@ actor CryptoEngine {
             throw CryptoEngineError.unknownSession
         }
         guard raw.count == 32 else { throw AegisCryptoError.invalidWireFormat }
-        return SymmetricKey(data: raw)
+        return raw
     }
 
     // MARK: - Fingerprints & verification

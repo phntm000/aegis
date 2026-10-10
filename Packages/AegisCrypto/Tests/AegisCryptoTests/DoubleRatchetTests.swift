@@ -47,7 +47,11 @@ final class DoubleRatchetTests: XCTestCase {
         let (alice, bob) = try makeSessionPair()
         let encrypted = try alice.encrypt(plaintext: Data("x".utf8), associatedData: Data("ctx-a".utf8))
         XCTAssertEqual(try bob.decrypt(encrypted, associatedData: Data("ctx-a".utf8)), Data("x".utf8))
-        XCTAssertThrowsError(try bob.decrypt(encrypted, associatedData: Data("ctx-b".utf8))) { error in
+        // Fresh message: wrong associated data must fail authentication.
+        // (Re-decrypting `encrypted` would hit "key already consumed" —
+        // forward secrecy deletes the key after first use, which is correct.)
+        let tampered = try alice.encrypt(plaintext: Data("y".utf8), associatedData: Data("ctx-a".utf8))
+        XCTAssertThrowsError(try bob.decrypt(tampered, associatedData: Data("ctx-b".utf8))) { error in
             XCTAssertEqual(error as? AegisCryptoError, .authenticationFailed)
         }
     }

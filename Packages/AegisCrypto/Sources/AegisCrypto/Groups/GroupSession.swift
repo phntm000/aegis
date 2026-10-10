@@ -37,7 +37,7 @@ public struct GroupMember: Equatable {
 /// A plaintext sender-key distribution paired with its intended recipient.
 /// The transport layer encrypts `distribution.serialized()` with the
 /// recipient's 1:1 session before sending.
-public struct OutgoingDistribution {
+public struct OutgoingDistribution: Sendable {
     public let recipientFingerprint: Data
     public let distribution: SenderKeyDistribution
 }

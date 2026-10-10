@@ -104,7 +104,7 @@ public struct Identity {
 
 /// The public half of an identity. Safe to publish in prekey bundles and
 /// invite strings.
-public struct IdentityPublic: Equatable {
+public struct IdentityPublic: Equatable, Sendable {
     public let signingPublicKey: Data
     public let agreementPublicKey: Data
 

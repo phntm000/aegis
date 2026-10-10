@@ -146,7 +146,7 @@ public struct SenderKeyState {
 ///
 /// Wire: `version u8 || groupID(32) || epoch u32 || senderID(32) ||`
 ///       `chainKey(32) || signingPub(32)`.
-public struct SenderKeyDistribution: Equatable {
+public struct SenderKeyDistribution: Equatable, Sendable {
     public let groupID: Data
     public let epoch: UInt32
     public let senderID: Data

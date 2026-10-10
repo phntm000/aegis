@@ -50,13 +50,15 @@ struct IdentitySettingsView: View {
                 .padding(.vertical, AegisLayout.m)
             }
 
-            Section("Fingerprint") {
+            Section {
                 Text(Formatters.groupedFingerprint(viewModel.fingerprint))
                     .font(AegisType.fingerprint)
                     .foregroundStyle(AegisColors.textPrimary)
                     .textSelection(.enabled)
                     .padding(.vertical, AegisLayout.xs)
                     .accessibilityLabel("Identity fingerprint")
+            } header: {
+                Text("Fingerprint")
             } footer: {
                 Text("Your identity fingerprint. Contacts compare this against what they see for you.")
             }
@@ -90,13 +92,15 @@ struct IdentitySettingsView: View {
                 }
             }
 
-            Section("Backup") {
+            Section {
                 Button {
                     showingBackupSheet = true
                 } label: {
                     Label("Export encrypted backup", systemImage: "externaldrive.fill.badge.checkmark")
                 }
                 .accessibilityHint("Exports your identity encrypted with a passphrase")
+            } header: {
+                Text("Backup")
             } footer: {
                 Text("The backup is encrypted with a passphrase you choose. Without it, the file is useless — to anyone.")
             }

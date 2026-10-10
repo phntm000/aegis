@@ -41,12 +41,12 @@ struct LiveCryptoService: CryptoService {
     }
 
     func loadIdentity() async throws -> LocalIdentity {
-        let (identity, displayName) = try await engine.loadIdentity()
+        let (pub, displayName, createdAt) = try await engine.loadIdentity()
         return LocalIdentity(
             id: core.localIdentityUUID,
             displayName: displayName,
-            publicKey: identity.publicView.serialized(),
-            createdAt: identity.createdAt
+            publicKey: pub.serialized(),
+            createdAt: createdAt
         )
     }
 
@@ -140,15 +140,15 @@ struct LiveCryptoService: CryptoService {
         guard let peer = await engine.identityPublic(forFingerprint: senderKey) else {
             throw CryptoEngineError.unknownSession
         }
-        return try engine.decryptDirect(ciphertext, from: peer)
+        return try await engine.decryptDirect(ciphertext, from: peer)
     }
 
     // MARK: Attachments
 
     func encryptAttachment(at fileURL: URL, conversationID: UUID) async throws -> EncryptedFile {
         let sidecar = await core.sidecars.load(id: conversationID)
-        let fileKey = try await engine.makeFileKey()
-        let blobURL = try AttachmentCrypto.encryptFile(at: fileURL, key: fileKey)
+        let fileKeyData = try await engine.makeFileKey()
+        let blobURL = try AttachmentCrypto.encryptFile(at: fileURL, key: SymmetricKey(data: fileKeyData))
         let byteCount = (try? FileManager.default.attributesOfItem(atPath: blobURL.path)[.size] as? Int64) ?? 0
         let groupID = sidecar.cryptoGroupID
         let peer: IdentityPublic?
@@ -157,7 +157,7 @@ struct LiveCryptoService: CryptoService {
         } else {
             peer = nil
         }
-        let wrapped = try await engine.wrapFileKey(fileKey, groupID: groupID, peer: peer)
+        let wrapped = try await engine.wrapFileKey(fileKeyData, groupID: groupID, peer: peer)
         // Remember how to unwrap: the decrypt path has no conversation.
         await core.noteAttachmentContext(
             wrappedKey: wrapped,
@@ -183,8 +183,8 @@ struct LiveCryptoService: CryptoService {
         } else {
             peer = nil
         }
-        let fileKey = try await engine.unwrapFileKey(wrappedKey, groupID: context?.groupID, peer: peer)
-        try AttachmentCrypto.decryptFile(at: ciphertextURL, key: fileKey, to: destinationURL)
+        let fileKeyData = try await engine.unwrapFileKey(wrappedKey, groupID: context?.groupID, peer: peer)
+        try AttachmentCrypto.decryptFile(at: ciphertextURL, key: SymmetricKey(data: fileKeyData), to: destinationURL)
     }
 
     // MARK: Backup
@@ -192,7 +192,7 @@ struct LiveCryptoService: CryptoService {
     func exportEncryptedBackup(passphrase: String) async throws -> Data {
         let snapshot = try await core.pkgStore.snapshot()
         let snapshotData = try JSONEncoder().encode(snapshot)
-        let (_, displayName) = try await engine.loadIdentity()
+        let (_, displayName, _) = try await engine.loadIdentity()
         return try await engine.exportBackup(passphrase: passphrase, displayName: displayName, storeSnapshot: snapshotData)
     }
 

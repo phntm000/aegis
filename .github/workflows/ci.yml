@@ -41,7 +41,30 @@ jobs:
         run: swift test --package-path Packages/AegisStore
 
       - name: Test AegisCrypto
+        env:
+          SWIFT_BACKTRACE: enable=yes
         run: swift test --package-path Packages/AegisCrypto
+
+      - name: Dump crash report (diagnostic)
+        if: failure()
+        run: |
+          d=~/Library/Logs/DiagnosticReports
+          f=$(ls -t "$d"/AegisCryptoPackageTests*.ips 2>/dev/null | head -1)
+          if [ -z "$f" ]; then f=$(ls -t "$d"/*.ips 2>/dev/null | head -1); fi
+          if [ -n "$f" ]; then echo "=== $f ==="; python3 -c "
+          import json,sys
+          d=json.load(open('$f'))
+          print(d.get('exception',{}))
+          print(d.get('faultingThread',{}).get('frames','')[:0])
+          for fr in d.get('threads',[])[:1]:
+              pass
+          # print crashed thread frames
+          for t in d.get('threads',[]):
+              if t.get('triggered'):
+                  for fr in t['frames'][:25]:
+                      print(fr.get('image','?')[-40:], hex(fr.get('imageOffset',0)), fr.get('symbol','?')[:80])
+                  break
+          "; else echo "no ips crash report found"; fi
 
       - name: Test AegisTransport
         run: swift test --package-path Packages/AegisTransport
