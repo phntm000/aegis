@@ -3,7 +3,7 @@
 
 current_item: hardening-audit-polish
 current_item_started_utc: 2026-10-10T10:52:20Z
-last_activity_utc: 2026-10-10T11:14:24Z
+last_activity_utc: 2026-10-10T11:20:44Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -49,3 +49,5 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - watchdog 2026-10-10T11:03:00Z: work ALIVE — remote commits landing (latest 5d34e0fc 11:01:35Z, ~2 min ago; cadence 10:52-11:01Z hardening commits); CI run 38046949015 in_progress (created 11:01:39Z), last two superseded runs cancelled. hardening-audit-polish worker iterating. Per liveness rules, no worker spawned.
   - watchdog 2026-10-10T11:09:00Z: work ALIVE — remote commits landing (latest 5d34e0fc 11:01:35Z, ~7 min ago; hardening cadence 10:52-11:01Z); last_activity_utc 11:01:28Z (~7 min ago); latest CI run 38046949015 completed success on 5d34e0fc. Per liveness rules, no worker spawned.
   - watchdog 2026-10-10T11:14:00Z: work ALIVE — remote commits landing (latest a42c875e 11:09:44Z, ~4 min ago; hardening cadence 10:52-11:09Z); last_activity_utc 11:09:32Z; CI run 38047428041 in_progress, previous 38046949015 completed success (green). Per liveness rules, no worker spawned.
+  - watchdog 2026-10-10T11:19:00Z: work ALIVE — remote commits landing (latest 9995bf94 11:14:40Z, ~4 min ago; hardening cadence 10:52-11:14Z incl. warning sweep, threat-model update, RFC 8032 vector revert); last_activity_utc 11:14:24Z (~4 min ago); CI run 38047721096 on 9995bf94 completed success (green). Per liveness rules, no worker spawned.
+  - hardening-audit-polish: done — launch fatalError replaced with LaunchErrorView (fail-closed + retry); 28 build warnings fixed (zero in our code); force-unwraps eliminated; HIG polish (Dynamic Type, 44pt targets, camera pre-permission rationale); ITSAppUsesNonExemptEncryption + EXPORT_COMPLIANCE.md; TESTFLIGHT.md; threat model gains voice-room + linked-device sections; CRYPTO.md documents AKD1; .ci-logs removed from repo; CI green on 38047721096
