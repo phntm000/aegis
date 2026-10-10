@@ -53,11 +53,13 @@ final class SQLCipherStoreTests: XCTestCase {
     private func makeMessage(
         in conversationID: ConversationID,
         text: String = "hello",
-        direction: MessageDirection = .outgoing
+        direction: MessageDirection = .outgoing,
+        kind: MessageKind = .text
     ) async throws -> Message {
         let m = Message(
             conversationID: conversationID,
             direction: direction,
+            kind: kind,
             text: text
         )
         try await store.messages.insert(m)
@@ -250,17 +252,18 @@ final class SQLCipherStoreTests: XCTestCase {
     func testPendingOutboxOrdering() async throws {
         let c = try await makeConversation()
         let m1 = try await makeMessage(in: c.id, text: "first")
-        _ = try await makeMessage(in: c.id, text: "second")
+        let m2 = try await makeMessage(in: c.id, text: "second")
         try await store.messages.setDeliveryState(id: m1.id, state: .sent)
+        // m1 is sent; m2 is still .queued so it remains pending.
         let outbox = try await store.messages.pendingOutbox(now: Date())
-        XCTAssertEqual(outbox.map(\.id), [])
+        XCTAssertEqual(outbox.map(\.id), [m2.id])
         // Scheduled messages stay out until fire time.
         var future = Message(conversationID: c.id, direction: .outgoing,
                              text: "later",
                              scheduledFor: Date().addingTimeInterval(3600))
         try await store.messages.insert(future)
         let scheduledOutbox = try await store.messages.pendingOutbox(now: Date())
-        XCTAssertTrue(scheduledOutbox.isEmpty)
+        XCTAssertEqual(scheduledOutbox.map(\.id), [m2.id])
         future.scheduledFor = Date().addingTimeInterval(-1)
         try await store.messages.update(future)
         let due = try await store.messages.pendingOutbox(now: Date())
@@ -274,7 +277,7 @@ final class SQLCipherStoreTests: XCTestCase {
         _ = try await makeMessage(in: c.id, text: "the quick brown fox")
         _ = try await makeMessage(in: c.id, text: "unrelated chatter")
 
-        let msgWithVoice = try await makeMessage(in: c.id, text: "")
+        let msgWithVoice = try await makeMessage(in: c.id, text: "", kind: .voiceNote)
         let attachment = Attachment(
             messageID: msgWithVoice.id, conversationID: c.id,
             kind: .voiceNote, fileName: "note.m4a", mimeType: "audio/mp4",
@@ -399,7 +402,7 @@ final class SQLCipherStoreTests: XCTestCase {
 
     func testAttachmentProgressClampsAndCompletes() async throws {
         let c = try await makeConversation()
-        let m = try await makeMessage(in: c.id, text: "")
+        let m = try await makeMessage(in: c.id, text: "", kind: .attachment)
         let attachment = Attachment(
             messageID: m.id, conversationID: c.id, kind: .image,
             fileName: "p.png", mimeType: "image/png",
