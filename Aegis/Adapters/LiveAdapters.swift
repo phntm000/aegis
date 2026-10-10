@@ -307,66 +307,6 @@ struct LiveTransportService: TransportService {
         try await core.sendCiphertext(envelope.ciphertext, conversationID: envelope.conversationID, kind: envelope.kind)
     }
 
-    /// Re-sends messages stuck in `.sending` (the offline outbox). The app
-    /// calls this on launch and when connectivity returns. Each message is
-    /// re-encrypted fresh (ratchet/sender-key state may have advanced) but
-    /// keeps its original ID, so recipients dedupe redeliveries.
-    func flushOutbox() async {
-        let pending: [Message]
-        do { pending = try await pendingOutbox() } catch { return }
-        for message in pending {
-            await resendOutboxMessage(message)
-        }
-    }
-
-    private func resendOutboxMessage(_ message: Message) async {
-        guard let conversation = try? await fetchConversation(id: message.conversationID) else {
-            // Conversation gone: mark failed so it leaves the outbox.
-            var failed = message
-            failed.status = .failed
-            try? await updateMessage(failed)
-            return
-        }
-        var payload = WirePayload.text(
-            id: message.id,
-            body: message.body,
-            replyToID: message.replyToID,
-            attachment: message.attachment,
-            voiceNote: message.voiceNote,
-            expiresIn: conversation.disappearingInterval
-        )
-        payload.previousFingerprint = await supersededIdentityFingerprint()
-        let sidecar = await core.sidecars.load(id: conversation.id)
-        let recipientKeys: [Data]
-        if let fp = sidecar.dmPeerFingerprint,
-           let peer = await engine.identityPublic(forFingerprint: fp)
-        {
-            recipientKeys = [peer.serialized()]
-        } else {
-            recipientKeys = []
-        }
-        do {
-            let ciphertext = try await encryptMessage(
-                payload.encoded(),
-                conversationID: conversation.id,
-                recipientKeys: recipientKeys
-            )
-            try await sendEnvelope(OutgoingEnvelope(
-                id: message.id,
-                conversationID: conversation.id,
-                ciphertext: ciphertext,
-                kind: .message
-            ))
-            var sent = message
-            sent.status = .sent
-            try? await updateMessage(sent)
-        } catch {
-            // Remains queued; the next flush or a manual retry tries again.
-            // (Never mark failed here: a transient outage must not look
-            // like a permanent failure.)
-        }
-    }
-
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws {
         var payload = WirePayload(kind: .typing)
         payload.isTyping = isTyping

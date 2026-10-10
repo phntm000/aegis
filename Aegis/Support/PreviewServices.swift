@@ -255,8 +255,6 @@ actor MockTransport: TransportService {
         sentEnvelopes.append(envelope)
     }
 
-    func flushOutbox() async {}
-
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws {}
     func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws {}
     func sendScreenshotNotice(conversationID: UUID) async throws {}

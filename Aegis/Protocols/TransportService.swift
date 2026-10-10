@@ -214,8 +214,6 @@ protocol TransportService: Sendable {
     // MARK: Messaging
 
     func sendEnvelope(_ envelope: OutgoingEnvelope) async throws
-    /// Re-sends messages stuck in `.sending` (the offline outbox).
-    func flushOutbox() async
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws
     func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws
     /// Notify peers that the local user took a screenshot (opt-in setting).

@@ -108,7 +108,7 @@ final class AppState: ObservableObject {
             phase = appLock.isEnabled ? .locked : .main
             if phase == .main {
                 // Flush the offline outbox now that we're live.
-                Task { await transport.flushOutbox() }
+                Task { await flushOutbox() }
             }
         } catch {
             bootstrapError = error.localizedDescription
@@ -121,7 +121,70 @@ final class AppState: ObservableObject {
         self.identity = identity
         self.bootstrapError = nil
         self.phase = .main
-        Task { await transport.flushOutbox() }
+        Task { await flushOutbox() }
+    }
+
+    /// Re-sends messages stuck in `.sending`/`.failed` (the offline outbox).
+    /// Called on launch and when connectivity returns. Each message is
+    /// re-encrypted fresh (ratchet/sender-key state may have advanced) but
+    /// keeps its original ID, so recipients dedupe redeliveries.
+    func flushOutbox() async {
+        let pending: [Message]
+        do { pending = try await store.pendingOutbox() } catch { return }
+        for message in pending {
+            await resendOutboxMessage(message)
+        }
+    }
+
+    private func resendOutboxMessage(_ message: Message) async {
+        guard let conversation = try? await store.fetchConversation(id: message.conversationID) else {
+            // Conversation gone: mark failed so it leaves the outbox.
+            var failed = message
+            failed.status = .failed
+            try? await store.updateMessage(failed)
+            return
+        }
+        var payload = WirePayload.text(
+            id: message.id,
+            body: message.body,
+            replyToID: message.replyToID,
+            attachment: message.attachment,
+            voiceNote: message.voiceNote,
+            expiresIn: conversation.disappearingInterval
+        )
+        payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
+        // Recipient keys: DM peer's key, or group members' keys.
+        let contacts = (try? await store.fetchContacts()) ?? []
+        let recipientKeys: [Data]
+        if conversation.kind == .direct,
+           let peerID = conversation.peerContactID,
+           let peerKey = contacts.first(where: { $0.id == peerID })?.identityKey {
+            recipientKeys = [peerKey]
+        } else {
+            recipientKeys = conversation.memberIDs.compactMap { id in
+                contacts.first { $0.id == id }?.identityKey
+            }
+        }
+        do {
+            let ciphertext = try await crypto.encryptMessage(
+                payload.encoded(),
+                conversationID: conversation.id,
+                recipientKeys: recipientKeys
+            )
+            try await transport.sendEnvelope(OutgoingEnvelope(
+                id: message.id,
+                conversationID: conversation.id,
+                ciphertext: ciphertext,
+                kind: .message
+            ))
+            var sent = message
+            sent.status = .sent
+            try? await store.updateMessage(sent)
+        } catch {
+            // Remains queued; the next flush or a manual retry tries again.
+            // (Never mark failed here: a transient outage must not look
+            // like a permanent failure.)
+        }
     }
 
     /// Full wipe: crypto identity + local store, then back to onboarding.
@@ -144,7 +207,7 @@ final class AppState: ObservableObject {
                 // Connectivity regained after an outage: flush the offline
                 // outbox so queued messages go out without manual retries.
                 if !wasSendable, state.canSend, self.phase == .main {
-                    Task { await self.transport.flushOutbox() }
+                    Task { await self.flushOutbox() }
                 }
             }
         }

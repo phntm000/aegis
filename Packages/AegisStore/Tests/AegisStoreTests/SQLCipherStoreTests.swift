@@ -557,15 +557,15 @@ final class SQLCipherStoreTests: XCTestCase {
     /// A v1 database (no ratchet_session table, user_version=1) migrates
     /// cleanly to v2 on the next open: the table is created and usable.
     func testV1ToV2Migration() async throws {
-        // Start at v2 with data, then downgrade the on-disk state to v1.
+        // Start at v3 with data, then downgrade the on-disk state to v1.
         try await store.sessions.save(fingerprint: "aa", snapshot: Data([0x01]))
         let conn = await store.conn
         try conn.exec("DROP TABLE ratchet_session;")
-        try conn.exec("DELETE FROM schema_migrations WHERE version = 2;")
+        try conn.exec("DELETE FROM schema_migrations WHERE version IN (2, 3);")
         try conn.exec("PRAGMA user_version = 1;")
         store = nil // release the old connection before reopening
 
-        // Reopening must re-apply the v2 migration cleanly.
+        // Reopening must re-apply the v2+v3 migrations cleanly.
         let migrated = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
         store = migrated
         let afterMigration = try await migrated.sessions.loadAll()
