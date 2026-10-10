@@ -23,7 +23,7 @@ extension SQLCipherAegisStore {
         ]
     }
 
-    private func decodeContact(_ r: SQLRow) throws -> Contact {
+    func decodeContact(_ r: SQLRow) throws -> Contact {
         Contact(
             id: UserID(try r.reqString("id")),
             displayName: try r.reqString("display_name"),
