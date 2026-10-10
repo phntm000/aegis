@@ -448,12 +448,13 @@ final class AppState: ObservableObject {
     }
 
     private func handleIncomingText(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
-        guard var conversation = try? await store.fetchConversation(id: envelope.conversationID) else { return }
+        guard var conversation = try? await store.fetchConversation(id: envelope.conversationID),
+              let messageID = payload.messageID else { return }
         let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         let expiresAt = payload.expiresIn.map { Date().addingTimeInterval($0) }
 
         let message = Message(
-            id: payload.messageID,
+            id: messageID,
             conversationID: conversation.id,
             senderID: contact.id,
             isFromMe: false,

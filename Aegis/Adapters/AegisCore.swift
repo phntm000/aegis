@@ -101,10 +101,15 @@ struct GroupRosterEntry: Codable, Sendable {
     var role: String
 }
 
+/// Request to re-transmit missed blob chunks. Sent 1:1 when a peer
+/// detects gaps in a chunked attachment/voice-note upload.
+struct BlobRequestBody: Codable, Sendable {
+    var uploadID: String
+}
+
 /// Invitation for a new group member (1:1 encrypted, alongside the sender-
 /// key distribution). The member needs the roster to construct GroupSession.
-struct GroupInviteInfo: Codable, Sendable {
-    var v: Int = 1
+struct GroupInviteInfo: Codable, Sendable {    var v: Int = 1
     var groupID: Data
     var epoch: UInt32
     var name: String
@@ -993,7 +998,7 @@ actor AegisCore {
                 {
                     var sidecar = await sidecars.load(id: conversationID)
                     sidecar.myRole = appRole
-                    await sidecars.save(id: conversationID, sidecar: sidecar)
+                    try await sidecars.save(id: conversationID, sidecar: sidecar)
                 }
             }
         case "blobRequest":
@@ -1069,7 +1074,7 @@ actor AegisCore {
         try await distribute(distributions)
         // Replace the membership table with the announced roster so roles
         // survive restarts and the UI shows the announcer's truth.
-        let cid = packageID(conversationID)
+        let cid: AegisStore.ConversationID = packageID(conversationID)
         let current = (try? await pkgStore.memberships.members(of: cid)) ?? []
         let rosterHexes = Set(roster.keys)
         for member in current where !rosterHexes.contains(member.userID.rawValue) {
@@ -1081,7 +1086,7 @@ actor AegisCore {
             if fp == localFP, let appRole = appRoleFromString(entry.role) {
                 var sidecar = await sidecars.load(id: conversationID)
                 sidecar.myRole = appRole
-                await sidecars.save(id: conversationID, sidecar: sidecar)
+                try await sidecars.save(id: conversationID, sidecar: sidecar)
             }
         }
     }
@@ -1122,7 +1127,7 @@ actor AegisCore {
         }
         var sidecar = await sidecars.load(id: conversationID)
         sidecar.cryptoGroupID = nil
-        await sidecars.save(id: conversationID, sidecar: sidecar)
+        try await sidecars.save(id: conversationID, sidecar: sidecar)
     }
 
     // MARK: - Conversation resolution
@@ -1255,7 +1260,7 @@ actor AegisCore {
         // 1:1 group invites so members can construct their GroupSession.
         let local = try await engine.localPublicIdentity()
         var roster: [String: String] = [local.fingerprint.hexString: "You"]
-        var memberKeys: [String: Data] = [local.fingerprint.hexString: local.publicView.serialized()]
+        var memberKeys: [String: Data] = [local.fingerprint.hexString: local.serialized()]
         for member in members {
             roster[member.fingerprint.hexString] = ""
             memberKeys[member.fingerprint.hexString] = member.serialized()
@@ -1498,7 +1503,7 @@ actor AegisCore {
            roster[local.fingerprint.hexString] == nil
         {
             roster[local.fingerprint.hexString] = GroupRosterEntry(
-                identityKey: local.publicView.serialized(), displayName: "You", role: "owner")
+                identityKey: local.serialized(), displayName: "You", role: "owner")
         }
         return roster
     }
