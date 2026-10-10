@@ -88,7 +88,7 @@ final class IdentityChangeTests: XCTestCase {
         // Mallory's prekey. (Signature bytes are irrelevant — the engine
         // rejects on the fingerprint mismatch before any signature check.)
         let mailboxID = CryptoEngine.identityMailbox(of: alicePub)
-        let eph = try X25519KeyPair.generate()
+        let eph = try X25519KeyPair.generate(provider: CryptoKitProvider.shared)
         let key = try SealedSender.sealedSenderKey(
             privateKey: eph.privateKey.toData(),
             peerPublicKey: alicePub.agreementPublicKey,
