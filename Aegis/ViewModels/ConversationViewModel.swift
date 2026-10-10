@@ -238,12 +238,12 @@ final class ConversationViewModel: ObservableObject {
         }
     }
 
-    /// Linked-device send path: the message is saved locally and handed to
-    /// the primary over the paired channel; the primary's echo (via sync)
-    /// flips it to `.sent`.
+    /// Linked-device send path: the message is shown as sending and handed
+    /// to the primary over the paired channel; the primary's echo (same ID)
+    /// persists it and flips it to `.sent`.
     private func sendTextViaPrimary(body: String?, replyToID: UUID?, senderID: UUID) async {
         let text = body ?? ""
-        var message = Message(
+        let message = Message(
             conversationID: conversation.id,
             senderID: senderID,
             isFromMe: true,
@@ -255,7 +255,6 @@ final class ConversationViewModel: ObservableObject {
             voiceNote: nil,
             sentAt: Date()
         )
-        try? await store.saveMessage(message)
         upsert(message)
         do {
             try await appState.sendAsLinkedDevice(
@@ -266,10 +265,10 @@ final class ConversationViewModel: ObservableObject {
             // The primary echoes the sent message back over sync; until
             // then it stays `.sending` (honest pending state).
         } catch {
-            message.status = .failed
+            var failed = message
+            failed.status = .failed
             sendError = error.localizedDescription
-            try? await store.updateMessage(message)
-            upsert(message)
+            upsert(failed)
         }
         await updateConversationPreview(for: message)
     }

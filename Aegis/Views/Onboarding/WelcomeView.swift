@@ -4,6 +4,8 @@ import SwiftUI
 /// is generated: identity is a keypair, there is nothing to sign up for.
 struct WelcomeView: View {
     var onContinue: () -> Void
+    @State private var showingLink = false
+    @EnvironmentObject private var appState: AppState
 
     var body: some View {
         VStack(spacing: AegisLayout.xl) {
@@ -43,6 +45,16 @@ struct WelcomeView: View {
                 .frame(maxWidth: .infinity, minHeight: AegisLayout.minTapTarget)
                 .padding(.horizontal, AegisLayout.l)
                 .accessibilityLabel("Get started with Aegis")
+            Button("Link to an existing device") {
+                showingLink = true
+            }
+            .font(AegisType.callout)
+            .foregroundStyle(AegisColors.accent)
+            .padding(.top, AegisLayout.s)
+            .accessibilityLabel("Link this device to an existing Aegis device")
+        }
+        .sheet(isPresented: $showingLink) {
+            LinkDeviceOnboardingView()
         }
     }
 

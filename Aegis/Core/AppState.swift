@@ -97,6 +97,13 @@ final class AppState: ObservableObject {
         }
         await notifications.refreshStatus()
 
+        // Linked secondary: no local identity keypair — the primary holds
+        // the keys and relays everything over the paired channel.
+        if await deviceLink.isLinkedDevice() {
+            enterLinkedMain()
+            return
+        }
+
         guard await crypto.hasIdentity() else {
             phase = .onboarding
             return
@@ -128,6 +135,26 @@ final class AppState: ObservableObject {
         self.bootstrapError = nil
         self.phase = .main
         Task { await flushOutbox() }
+    }
+
+    /// Enters the main UI as a linked secondary (no local identity keypair).
+    /// Uses a stable synthesized identity so the UI has a "me" to render;
+    /// it is never used for cryptography (all crypto happens on the primary).
+    func enterLinkedMain() {
+        let name = UserDefaults.standard.string(forKey: "aegis.linkedDisplayName") ?? "Aegis user"
+        let id: UUID
+        if let s = UserDefaults.standard.string(forKey: "aegis.linkedIdentityID"),
+           let u = UUID(uuidString: s) {
+            id = u
+        } else {
+            id = UUID()
+            UserDefaults.standard.set(id.uuidString, forKey: "aegis.linkedIdentityID")
+        }
+        // A linked device that hasn't finished pairing yet has no name;
+        // provisioning fills it in and re-enters.
+        self.identity = LocalIdentity(id: id, displayName: name, publicKey: Data(), createdAt: Date())
+        self.bootstrapError = nil
+        self.phase = .main
     }
 
     /// Re-sends messages stuck in `.sending`/`.failed` (the offline outbox).
@@ -869,6 +896,11 @@ final class AppState: ObservableObject {
                     self.pairingSASWords = nil
                     self.isLinkedDevice = await self.deviceLink.isLinkedDevice()
                     self.linkedDevices = await self.deviceLink.linkedDevices()
+                    // Fresh secondary finishing pairing during onboarding:
+                    // enter the main UI now that provisioning is applied.
+                    if self.phase == .onboarding {
+                        self.enterLinkedMain()
+                    }
                 }
             }
         }
@@ -965,6 +997,7 @@ final class AppState: ObservableObject {
         // The secondary adopts the primary's roster. Contacts and
         // conversations are upserted; recent messages fill the threads.
         // Identity keys are public material already known to the account.
+        UserDefaults.standard.set(bundle.displayName, forKey: "aegis.linkedDisplayName")
         for lc in bundle.contacts {
             let contact = Contact(
                 id: lc.id,
