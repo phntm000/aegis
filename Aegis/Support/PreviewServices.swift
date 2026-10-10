@@ -32,6 +32,102 @@ struct PreviewServiceFactory: ServiceFactory {
     func makeCrypto() -> any CryptoService { MockCrypto() }
     func makeTransport() -> any TransportService { MockTransport() }
     func makeStore() -> any StoreService { MockStore() }
+    func makeVoiceRoom() -> any VoiceRoomService { MockVoiceRoom() }
+    func makeDeviceLink() -> any DeviceLinkService { MockDeviceLink() }
+}
+
+// MARK: - Mock voice room (in-memory room for previews)
+
+final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
+    private let lock = NSLock()
+    private var room: VoiceRoom?
+    private let cont: AsyncStream<VoiceRoomEvent>.Continuation
+    private let stream: AsyncStream<VoiceRoomEvent>
+
+    var events: AsyncStream<VoiceRoomEvent> {
+        get async { stream }
+    }
+
+    init() {
+        let (s, c) = AsyncStream<VoiceRoomEvent>.makeStream()
+        self.stream = s
+        self.cont = c
+    }
+
+    func currentRoom() async -> VoiceRoom? {
+        lock.withLock { room }
+    }
+
+    func joinRoom(conversationID: UUID, groupName: String) async {
+        let me = VoiceRoomParticipant(
+            fingerprintHex: "local", displayName: "You",
+            isMuted: false, isDeafened: false,
+            joinedAt: Date(), lastHeartbeat: Date(), isLocal: true
+        )
+        let sample = VoiceRoomParticipant(
+            fingerprintHex: "peer", displayName: "Preview Peer",
+            isMuted: false, isDeafened: false,
+            joinedAt: Date(), lastHeartbeat: Date()
+        )
+        lock.withLock {
+            room = VoiceRoom(
+                conversationID: conversationID, groupName: groupName,
+                participants: [me, sample],
+                localMuted: false, localDeafened: false, joinedAt: Date()
+            )
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func leaveRoom() async {
+        lock.withLock { room = nil }
+        cont.yield(.updated(nil))
+    }
+
+    func setMuted(_ muted: Bool) async {
+        lock.withLock {
+            room?.localMuted = muted
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].isMuted = muted
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setDeafened(_ deafened: Bool) async {
+        lock.withLock {
+            room?.localDeafened = deafened
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].isDeafened = deafened
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+}
+
+// MARK: - Mock device link (inert)
+
+struct MockDeviceLink: DeviceLinkService {
+    func isLinkedDevice() async -> Bool { false }
+    func localDeviceID() async -> UUID { UUID() }
+    func linkedDevices() async -> [DeviceInfo] { [] }
+    var pairingEvents: AsyncStream<DeviceLinkManager.PairingEvent> {
+        get async { AsyncStream { _ in } }
+    }
+    var syncEvents: AsyncStream<DeviceLinkManager.SyncEvent> {
+        get async { AsyncStream { _ in } }
+    }
+    func beginPairingAsPrimary() async throws -> DeviceLinkManager.PrimaryPairingContext {
+        throw PreviewServiceError.noIdentity
+    }
+    func pairingSASWords() async -> [String]? { nil }
+    func confirmPairing(provisioning: ProvisioningBundle) async throws {}
+    func cancelPairing() async {}
+    func beginPairingAsSecondary(qrPayload: String, deviceName: String) async throws -> [String] {
+        throw PreviewServiceError.noIdentity
+    }
+    func sendSync(kind: DeviceSyncKind, body: Data) async throws {}
+    func unpair(deviceID: UUID) async {}
 }
 
 // MARK: - Mock crypto (NOT real cryptography)

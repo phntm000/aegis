@@ -44,6 +44,8 @@ final class AppState: ObservableObject {
     let crypto: any CryptoService
     let transport: any TransportService
     let store: any StoreService
+    let voiceRoom: any VoiceRoomService
+    let deviceLink: any DeviceLinkService
 
     let appLock: AppLockManager
     let privacy: PrivacyController
@@ -69,6 +71,8 @@ final class AppState: ObservableObject {
         self.crypto = factory.makeCrypto()
         self.transport = factory.makeTransport()
         self.store = factory.makeStore()
+        self.voiceRoom = factory.makeVoiceRoom()
+        self.deviceLink = factory.makeDeviceLink()
         self.appLock = AppLockManager()
         self.privacy = PrivacyController()
         self.notifications = NotificationManager()
@@ -88,6 +92,8 @@ final class AppState: ObservableObject {
         if !didStartListeners {
             didStartListeners = true
             startTransportListeners()
+            startVoiceRoomListeners()
+            startDeviceLinkListeners()
         }
         await notifications.refreshStatus()
 
@@ -467,6 +473,9 @@ final class AppState: ObservableObject {
             sentAt: envelope.receivedAt
         )
         try? await store.saveMessage(message)
+        // Primary: mirror inbound traffic to linked devices so their
+        // threads stay in sync.
+        await forwardToLinkedDevices(message, conversation: conversation, senderName: contact.displayName)
 
         conversation.unreadCount += (visibleConversationID == conversation.id) ? 0 : 1
         conversation.lastMessagePreview = previewText(for: message, senderName: contact.displayName)
@@ -791,5 +800,379 @@ final class AppState: ObservableObject {
             endReason: reason
         )
         try? await store.saveCallRecord(record)
+    }
+
+    // MARK: - Voice rooms
+
+    /// The currently joined voice room (nil when not in one).
+    @Published private(set) var voiceRoomState: VoiceRoom?
+
+    func startVoiceRoomListeners() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await event in await self.voiceRoom.events {
+                switch event {
+                case .updated(let room):
+                    self.voiceRoomState = room
+                case .speakingChanged:
+                    break // reserved; no UI binding yet
+                }
+            }
+        }
+    }
+
+    func joinVoiceRoom(_ conversation: Conversation) async {
+        await voiceRoom.joinRoom(conversationID: conversation.id, groupName: conversation.title)
+    }
+
+    func leaveVoiceRoom() async {
+        await voiceRoom.leaveRoom()
+    }
+
+    func setVoiceRoomMuted(_ muted: Bool) async {
+        await voiceRoom.setMuted(muted)
+    }
+
+    func setVoiceRoomDeafened(_ deafened: Bool) async {
+        await voiceRoom.setDeafened(deafened)
+    }
+
+    // MARK: - Linked devices
+
+    /// Devices linked to this one (primary: secondaries; secondary: primary).
+    @Published private(set) var linkedDevices: [DeviceInfo] = []
+    /// True when this device is a linked secondary relaying via its primary.
+    @Published private(set) var isLinkedDevice = false
+    /// QR payload for the in-progress primary pairing attempt.
+    @Published var pairingQRPayload: String?
+    /// SAS words to display (primary: after the new device scans; secondary:
+    /// immediately after scanning).
+    @Published var pairingSASWords: [String]?
+
+    func startDeviceLinkListeners() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isLinkedDevice = await self.deviceLink.isLinkedDevice()
+            self.linkedDevices = await self.deviceLink.linkedDevices()
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await event in await self.deviceLink.pairingEvents {
+                switch event {
+                case .sasReady(let words):
+                    self.pairingSASWords = words
+                case .aborted:
+                    self.pairingQRPayload = nil
+                    self.pairingSASWords = nil
+                case .provisioned:
+                    self.pairingQRPayload = nil
+                    self.pairingSASWords = nil
+                    self.isLinkedDevice = await self.deviceLink.isLinkedDevice()
+                    self.linkedDevices = await self.deviceLink.linkedDevices()
+                }
+            }
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await (message, fromDevice) in await self.deviceLink.syncEvents {
+                await self.handleDeviceSync(message, fromDevice: fromDevice)
+            }
+        }
+    }
+
+    func refreshLinkedDevices() async {
+        linkedDevices = await deviceLink.linkedDevices()
+        isLinkedDevice = await deviceLink.isLinkedDevice()
+    }
+
+    // MARK: Pairing orchestration
+
+    /// Primary: starts pairing and returns the QR payload to display.
+    func beginPrimaryPairing() async throws -> String {
+        let ctx = try await deviceLink.beginPairingAsPrimary()
+        pairingQRPayload = ctx.qrPayload
+        pairingSASWords = nil
+        return ctx.qrPayload
+    }
+
+    func cancelPairing() async {
+        await deviceLink.cancelPairing()
+        pairingQRPayload = nil
+        pairingSASWords = nil
+    }
+
+    /// Primary: the user confirmed the SAS words match. Builds the
+    /// provisioning bundle from the local store and sends it sealed.
+    func confirmPairing() async throws {
+        let bundle = await buildProvisioningBundle()
+        try await deviceLink.confirmPairing(provisioning: bundle)
+        pairingQRPayload = nil
+        pairingSASWords = nil
+        await refreshLinkedDevices()
+    }
+
+    /// Secondary: scans the QR, sends hello, returns SAS words to display.
+    func beginSecondaryPairing(qrPayload: String) async throws -> [String] {
+        let name = "\(UIDevice.current.model) (\(UIDevice.current.systemVersion))"
+        let words = try await deviceLink.beginPairingAsSecondary(qrPayload: qrPayload, deviceName: name)
+        pairingSASWords = words
+        return words
+    }
+
+    func unpairDevice(_ device: DeviceInfo) async {
+        await deviceLink.unpair(deviceID: device.deviceID)
+        await refreshLinkedDevices()
+    }
+
+    // MARK: Provisioning (primary builds, secondary applies)
+
+    private func buildProvisioningBundle() async -> ProvisioningBundle {
+        let contacts = (try? await store.fetchContacts()) ?? []
+        let conversations = (try? await store.fetchConversations()) ?? []
+        var recent: [String: [LinkedMessage]] = [:]
+        for conv in conversations.prefix(50) {
+            let messages = (try? await store.fetchMessages(conversationID: conv.id, limit: 50, before: nil)) ?? []
+            recent[conv.id.uuidString] = messages.map { $0.asLinked() }
+        }
+        let myID = await deviceLink.localDeviceID()
+        return ProvisioningBundle(
+            primaryDeviceID: myID,
+            primaryDeviceName: "\(UIDevice.current.model)",
+            displayName: identity?.displayName ?? "Aegis user",
+            contacts: contacts.map {
+                LinkedContact(id: $0.id, displayName: $0.displayName, fingerprintHex: $0.identityKey.hexString)
+            },
+            conversations: conversations.map {
+                LinkedConversation(
+                    id: $0.id, title: $0.title, kind: "\($0.kind)",
+                    lastMessagePreview: $0.lastMessagePreview,
+                    lastMessageAt: $0.lastMessageAt,
+                    unreadCount: $0.unreadCount
+                )
+            },
+            recentMessages: recent,
+            assignedDevice: DeviceInfo(
+                deviceID: UUID(),
+                deviceName: "Linked device",
+                deviceModel: nil,
+                pairedAt: Date(),
+                lastSeen: Date()
+            )
+        )
+    }
+
+    private func applyProvisioningBundle(_ bundle: ProvisioningBundle) async {
+        // The secondary adopts the primary's roster. Contacts and
+        // conversations are upserted; recent messages fill the threads.
+        // Identity keys are public material already known to the account.
+        for lc in bundle.contacts {
+            let contact = Contact(
+                id: lc.id,
+                displayName: lc.displayName,
+                identityKey: Data(hexString: lc.fingerprintHex) ?? Data(),
+                verification: .unverified,
+                isBlocked: false,
+                lastSeenAt: nil,
+                notes: nil
+            )
+            try? await store.saveContact(contact)
+        }
+        for lconv in bundle.conversations {
+            var conv = Conversation(
+                id: lconv.id,
+                kind: lconv.kind == "group" ? .group : .direct,
+                title: lconv.title
+            )
+            conv.lastMessagePreview = lconv.lastMessagePreview
+            conv.lastMessageAt = lconv.lastMessageAt
+            conv.unreadCount = lconv.unreadCount
+            try? await store.saveConversation(conv)
+            for lm in bundle.recentMessages[lconv.id.uuidString] ?? [] {
+                try? await store.saveMessage(lm.asMessage())
+            }
+        }
+    }
+
+    // MARK: Paired-channel sync
+
+    private func handleDeviceSync(_ message: DeviceSyncMessage, fromDevice: UUID) async {
+        switch message.kind {
+        case .provisioningApplied:
+            if let bundle = try? JSONDecoder().decode(ProvisioningBundle.self, from: message.body) {
+                await applyProvisioningBundle(bundle)
+            }
+        case .incomingMessage:
+            // A new message on the primary (received or sent): upsert it.
+            if let incoming = try? JSONDecoder().decode(LinkedIncomingMessage.self, from: message.body) {
+                try? await store.saveMessage(incoming.message.asMessage())
+                if let conv = incoming.conversation {
+                    if var existing = try? await store.fetchConversation(id: conv.id) {
+                        existing.lastMessagePreview = conv.lastMessagePreview
+                        existing.lastMessageAt = conv.lastMessageAt
+                        try? await store.saveConversation(existing)
+                    } else {
+                        var created = Conversation(id: conv.id, kind: conv.kind == "group" ? .group : .direct, title: conv.title)
+                        created.lastMessagePreview = conv.lastMessagePreview
+                        created.lastMessageAt = conv.lastMessageAt
+                        try? await store.saveConversation(created)
+                    }
+                }
+                inboundSubject.send(incoming.message.asMessage())
+            }
+        case .messageStatus:
+            if let status = try? JSONDecoder().decode(LinkedMessageStatus.self, from: message.body),
+               let msgs = try? await store.fetchMessages(conversationID: status.conversationID, limit: 200, before: nil),
+               var msg = msgs.first(where: { $0.id == status.messageID })
+            {
+                msg.status = MessageStatus(rawValue: status.status) ?? .sent
+                try? await store.updateMessage(msg)
+            }
+        case .sendMessage:
+            // Primary only: the linked device asks us to send a message.
+            guard await !isLinkedDevice else { return }
+            if let req = try? JSONDecoder().decode(LinkedSendRequest.self, from: message.body) {
+                await sendLinkedDeviceMessage(req)
+            }
+        case .unpair:
+            await deviceLink.unpair(deviceID: fromDevice)
+            await refreshLinkedDevices()
+        case .heartbeat:
+            await refreshLinkedDevices()
+        }
+    }
+
+    /// Primary: sends a message on behalf of a linked device through the
+    /// normal E2EE path, then forwards the sent message back so the linked
+    /// device's thread matches.
+    private func sendLinkedDeviceMessage(_ req: LinkedSendRequest) async {
+        guard let me = identity,
+              let conversation = try? await store.fetchConversation(id: req.conversationID)
+        else { return }
+        var message = Message(
+            conversationID: req.conversationID,
+            senderID: me.id,
+            isFromMe: true,
+            body: req.body,
+            replyToID: req.replyToID,
+            status: .sending,
+            expiresAt: conversation.disappearingInterval.map { Date().addingTimeInterval($0) },
+            attachment: nil,
+            voiceNote: nil,
+            sentAt: Date()
+        )
+        message.id = req.messageID
+        try? await store.saveMessage(message)
+        do {
+            var payload = WirePayload.text(
+                id: req.messageID,
+                body: req.body,
+                replyToID: req.replyToID,
+                attachment: nil,
+                voiceNote: nil,
+                expiresIn: conversation.disappearingInterval
+            )
+            payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
+            let ciphertext = try await crypto.encryptMessage(
+                payload.encoded(),
+                conversationID: req.conversationID,
+                recipientKeys: await recipientKeys(for: conversation, excluding: me.id)
+            )
+            try await transport.sendEnvelope(OutgoingEnvelope(
+                id: req.messageID,
+                conversationID: req.conversationID,
+                ciphertext: ciphertext,
+                kind: .message
+            ))
+            message.status = .sent
+        } catch {
+            message.status = .failed
+        }
+        try? await store.updateMessage(message)
+        // Echo back to the linked device so its thread shows the message.
+        let linked = LinkedIncomingMessage(
+            message: message.asLinked(senderName: me.displayName),
+            conversation: LinkedConversation(
+                id: conversation.id, title: conversation.title, kind: "\(conversation.kind)",
+                lastMessagePreview: req.body, lastMessageAt: message.sentAt, unreadCount: 0
+            )
+        )
+        if let body = try? JSONEncoder().encode(linked) {
+            try? await deviceLink.sendSync(kind: .incomingMessage, body: body)
+        }
+    }
+
+    /// Forwards a newly sent/received message to linked devices (primary).
+    func forwardToLinkedDevices(_ message: Message, conversation: Conversation, senderName: String?) async {
+        guard await !isLinkedDevice else { return }
+        let linked = LinkedIncomingMessage(
+            message: message.asLinked(senderName: senderName),
+            conversation: LinkedConversation(
+                id: conversation.id, title: conversation.title, kind: "\(conversation.kind)",
+                lastMessagePreview: message.body, lastMessageAt: message.sentAt, unreadCount: 0
+            )
+        )
+        guard let body = try? JSONEncoder().encode(linked) else { return }
+        try? await deviceLink.sendSync(kind: .incomingMessage, body: body)
+    }
+
+    /// Linked device: sends a text message via the primary.
+    func sendAsLinkedDevice(conversationID: UUID, body: String, replyToID: UUID?) async throws {
+        let req = LinkedSendRequest(
+            conversationID: conversationID,
+            body: body,
+            replyToID: replyToID,
+            messageID: UUID()
+        )
+        try await deviceLink.sendSync(kind: .sendMessage, body: JSONEncoder().encode(req))
+    }
+
+    /// Recipient identity keys for a conversation (DM peer or group members).
+    private func recipientKeys(for conversation: Conversation, excluding senderID: UUID? = nil) async -> [Data] {
+        let contacts = (try? await store.fetchContacts()) ?? []
+        if conversation.kind == .direct {
+            let peerID = conversation.memberIDs.first { $0 != senderID }
+            let peerKey = peerID.flatMap { id in contacts.first(where: { $0.id == id })?.identityKey }
+            return peerKey.map { [$0] } ?? []
+        }
+        return conversation.memberIDs.compactMap { id in
+            contacts.first { $0.id == id }?.identityKey
+        }
+    }
+}
+
+// MARK: - Linked-device model bridges
+
+private extension Message {
+    func asLinked(senderName: String? = nil) -> LinkedMessage {
+        LinkedMessage(
+            id: id,
+            conversationID: conversationID,
+            body: body,
+            replyToID: replyToID,
+            isFromMe: isFromMe,
+            senderName: senderName,
+            status: status.rawValue,
+            sentAt: sentAt,
+            expiresAt: expiresAt
+        )
+    }
+}
+
+private extension LinkedMessage {
+    func asMessage() -> Message {
+        var m = Message(
+            conversationID: conversationID,
+            senderID: UUID(),
+            isFromMe: isFromMe,
+            body: body,
+            replyToID: replyToID,
+            status: MessageStatus(rawValue: status) ?? .delivered,
+            expiresAt: expiresAt,
+            attachment: nil,
+            voiceNote: nil,
+            sentAt: sentAt
+        )
+        m.id = id
+        return m
     }
 }

@@ -49,9 +49,9 @@ struct SettingsView: View {
                 }
 
                 Section {
-
                     settingsRow(icon: "internaldrive.fill", title: "Storage", color: AegisColors.textSecondary, destination: AnyView(StorageSettingsView(appState: appState)))
                     settingsRow(icon: "server.rack", title: "Relay", color: AegisColors.warning, destination: AnyView(RelaySettingsView(appState: appState)))
+                    settingsRow(icon: "ipad.and.iphone", title: "Linked devices", color: AegisColors.accent, destination: AnyView(DeviceLinkView().environmentObject(appState)))
                 } header: {
                     Text("Data & network")
                 } footer: {

@@ -175,6 +175,11 @@ final class ConversationViewModel: ObservableObject {
         voiceNote: VoiceNote?
     ) async {
         guard let me = appState.identity else { return }
+        // Linked secondary: relay the send through the primary device.
+        if appState.isLinkedDevice, attachment == nil, voiceNote == nil {
+            await sendTextViaPrimary(body: body, replyToID: replyToID, senderID: me.id)
+            return
+        }
         let messageID = UUID()
         let expiresAt = conversation.disappearingInterval.map { Date().addingTimeInterval($0) }
 
@@ -226,6 +231,46 @@ final class ConversationViewModel: ObservableObject {
         }
         try? await store.updateMessage(message)
         upsert(message)
+        await updateConversationPreview(for: message)
+        // Primary: mirror the sent message to linked devices.
+        if message.status == .sent {
+            await appState.forwardToLinkedDevices(message, conversation: conversation, senderName: nil)
+        }
+    }
+
+    /// Linked-device send path: the message is saved locally and handed to
+    /// the primary over the paired channel; the primary's echo (via sync)
+    /// flips it to `.sent`.
+    private func sendTextViaPrimary(body: String?, replyToID: UUID?, senderID: UUID) async {
+        let text = body ?? ""
+        var message = Message(
+            conversationID: conversation.id,
+            senderID: senderID,
+            isFromMe: true,
+            body: text,
+            replyToID: replyToID,
+            status: .sending,
+            expiresAt: conversation.disappearingInterval.map { Date().addingTimeInterval($0) },
+            attachment: nil,
+            voiceNote: nil,
+            sentAt: Date()
+        )
+        try? await store.saveMessage(message)
+        upsert(message)
+        do {
+            try await appState.sendAsLinkedDevice(
+                conversationID: conversation.id,
+                body: text,
+                replyToID: replyToID
+            )
+            // The primary echoes the sent message back over sync; until
+            // then it stays `.sending` (honest pending state).
+        } catch {
+            message.status = .failed
+            sendError = error.localizedDescription
+            try? await store.updateMessage(message)
+            upsert(message)
+        }
         await updateConversationPreview(for: message)
     }
 

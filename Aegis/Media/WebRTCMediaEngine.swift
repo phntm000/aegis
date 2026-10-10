@@ -323,6 +323,16 @@ extension WebRTCMediaEngine: CallMediaControl {
         }
     }
 
+    func setRemoteAudioEnabled(_ enabled: Bool, for callID: UUID) {
+        lock.withLock {
+            guard let media = peers[callID] else { return }
+            media.remoteAudioMuted = !enabled
+            for track in media.remoteAudioTracks {
+                track.isEnabled = enabled
+            }
+        }
+    }
+
     func setVideoEnabled(_ enabled: Bool, callID: UUID) async throws {
         lock.withLock {
             guard let media = peers[callID] else { return }
@@ -433,6 +443,20 @@ extension WebRTCMediaEngine: RTCPeerConnectionDelegate {
         didAdd rtpReceiver: RTCRtpReceiver,
         streams: [RTCMediaStream]
     ) {
+        // Remote audio tracks are remembered so deafen (voice rooms) can
+        // disable them without tearing down the peer connection. Remote
+        // audio plays through the shared RTCAudioSession by default.
+        if let audioTrack = rtpReceiver.track as? RTCAudioTrack {
+            lock.withLock {
+                if let callID = pcToCallID[ObjectIdentifier(peerConnection)],
+                   let media = peers[callID]
+                {
+                    media.remoteAudioTracks.append(audioTrack)
+                    audioTrack.isEnabled = !media.remoteAudioMuted
+                }
+            }
+            return
+        }
         guard let videoTrack = rtpReceiver.track as? RTCVideoTrack else { return }
         let (callID, router) = lock.withLock({
             (pcToCallID[ObjectIdentifier(peerConnection)], frameRouter)
@@ -460,6 +484,10 @@ private final class PeerMedia {
     var videoEnabled = true
     var isScreenSharing = false
     var createdOffer = false
+    /// Remote audio tracks received on this connection (voice rooms).
+    var remoteAudioTracks: [RTCAudioTrack] = []
+    /// Deafen state: when true, remote audio tracks stay disabled.
+    var remoteAudioMuted = false
 
     init(callID: UUID, connection: RTCPeerConnection) {
         self.callID = callID

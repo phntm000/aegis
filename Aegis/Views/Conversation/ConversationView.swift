@@ -22,6 +22,10 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             ConnectionBannerView()
 
+            if viewModel.conversation.kind == .group {
+                VoiceRoomBannerView(conversation: viewModel.conversation)
+            }
+
             if let contact = viewModel.displayContact,
                contact.verification == .identityChanged {
                 IdentityChangedBanner(

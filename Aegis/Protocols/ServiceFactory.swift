@@ -6,4 +6,6 @@ protocol ServiceFactory: Sendable {
     func makeCrypto() -> any CryptoService
     func makeTransport() -> any TransportService
     func makeStore() -> any StoreService
+    func makeVoiceRoom() -> any VoiceRoomService
+    func makeDeviceLink() -> any DeviceLinkService
 }

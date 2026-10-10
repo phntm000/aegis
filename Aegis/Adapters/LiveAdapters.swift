@@ -977,4 +977,92 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
     func makeCrypto() -> any CryptoService { cryptoService }
     func makeTransport() -> any TransportService { transportService }
     func makeStore() -> any StoreService { storeService }
+    func makeVoiceRoom() -> any VoiceRoomService { LiveVoiceRoomService(core: core) }
+    func makeDeviceLink() -> any DeviceLinkService { LiveDeviceLinkService(core: core) }
+}
+
+// MARK: - Voice rooms (live)
+
+/// Live VoiceRoomService: thin wrapper over AegisCore.voiceRooms.
+struct LiveVoiceRoomService: VoiceRoomService {
+    let core: AegisCore
+
+    var events: AsyncStream<VoiceRoomEvent> {
+        get async { await core.voiceRooms.events }
+    }
+
+    func currentRoom() async -> VoiceRoom? {
+        await core.voiceRooms.currentRoom
+    }
+
+    func joinRoom(conversationID: UUID, groupName: String) async {
+        await core.voiceRooms.joinRoom(conversationID: conversationID, groupName: groupName)
+    }
+
+    func leaveRoom() async {
+        await core.voiceRooms.leaveRoom()
+    }
+
+    func setMuted(_ muted: Bool) async {
+        await core.voiceRooms.setLocalMuted(muted)
+    }
+
+    func setDeafened(_ deafened: Bool) async {
+        await core.voiceRooms.setLocalDeafened(deafened)
+    }
+}
+
+// MARK: - Linked devices (live)
+
+/// Live DeviceLinkService: thin wrapper over AegisCore.deviceLink.
+struct LiveDeviceLinkService: DeviceLinkService {
+    let core: AegisCore
+
+    func isLinkedDevice() async -> Bool {
+        await core.deviceLink.isLinkedDevice
+    }
+
+    func localDeviceID() async -> UUID {
+        await core.deviceLink.localDeviceID
+    }
+
+    func linkedDevices() async -> [DeviceInfo] {
+        await core.deviceLink.linkedDevices
+    }
+
+    var pairingEvents: AsyncStream<DeviceLinkManager.PairingEvent> {
+        get async { await core.deviceLink.pairingEvents }
+    }
+
+    var syncEvents: AsyncStream<DeviceLinkManager.SyncEvent> {
+        get async { await core.deviceLink.syncEvents }
+    }
+
+    func beginPairingAsPrimary() async throws -> DeviceLinkManager.PrimaryPairingContext {
+        try await core.deviceLink.beginPairingAsPrimary()
+    }
+
+    func pairingSASWords() async -> [String]? {
+        await core.deviceLink.pairingSASWords()
+    }
+
+    func confirmPairing(provisioning: ProvisioningBundle) async throws {
+        try await core.deviceLink.confirmPairing(provisioning: provisioning)
+    }
+
+    func cancelPairing() async {
+        await core.deviceLink.cancelPairing()
+    }
+
+    func beginPairingAsSecondary(qrPayload: String, deviceName: String) async throws -> [String] {
+        try await core.deviceLink.beginPairingAsSecondary(qrPayload: qrPayload, deviceName: deviceName)
+    }
+
+    func sendSync(kind: DeviceSyncKind, body: Data) async throws {
+        try await core.deviceLink.sendSync(kind: kind, body: body)
+    }
+
+    func unpair(deviceID: UUID) async {
+        await core.deviceLink.unpair(deviceID: deviceID)
+    }
 }

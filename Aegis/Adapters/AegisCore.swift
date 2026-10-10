@@ -91,6 +91,8 @@ struct GroupControlMessage: Codable, Sendable {
     var roster: [String: GroupRosterEntry]?
     /// For "blobRequest": uploadID hex the requester is missing.
     var blobUploadID: String? = nil
+    /// For "voiceRoom": JSON-encoded `VoiceRoomSignal`.
+    var voiceRoomSignal: Data? = nil
 }
 
 /// One roster entry in a membership announcement.
@@ -175,6 +177,9 @@ protocol CallMediaControl: AnyObject, Sendable {
     var screenShareSupported: Bool { get }
     /// Tears down the peer connection and capturers for a finished call.
     func endCallMedia(_ callID: UUID)
+    /// Enables/disables remote audio rendering on one peer connection
+    /// (voice-room "deafen"). Does not affect the local microphone.
+    func setRemoteAudioEnabled(_ enabled: Bool, for callID: UUID)
 }
 
 /// Thrown when a media control is invoked with no media engine attached.
@@ -191,6 +196,8 @@ actor AegisCore {
     enum RouteTarget {
         case direct(fingerprint: Data)
         case group(groupID: Data, conversationID: UUID)
+        /// Linked-device traffic: pairing handshake or paired channel.
+        case deviceLink(channel: DeviceLinkChannel)
     }
 
     // MARK: Owned packages
@@ -319,7 +326,67 @@ actor AegisCore {
         // Self-boot: the ServiceFactory protocol has no async hook, so the
         // core starts its transports and inbound dispatch on creation. The
         // app's AppState.bootstrap() then drives relay configuration.
+        self.voiceRooms = VoiceRoomManager(core: self)
+        self.deviceLink = DeviceLinkManager(core: self)
         Task { [weak self] in try? await self?.start() }
+    }
+
+    // MARK: - Voice rooms
+
+    /// The app's voice-room session manager (one active room at a time).
+    let voiceRooms: VoiceRoomManager
+    /// Linked-device manager (paired-device relay model).
+    let deviceLink: DeviceLinkManager
+
+    /// Media stack accessors for the voice-room manager.
+    func voiceRoomMedia() -> (any CallMediaDelegate)? { mediaDelegate }
+    func voiceRoomMediaControl() -> (any CallMediaControl)? {
+        mediaDelegate as? any CallMediaControl
+    }
+    func voiceRoomLocalFingerprintHex() async -> String? {
+        try? await engine.localPublicIdentity().fingerprint.hexString
+    }
+    func voiceRoomLocalDisplayName() async -> String {
+        await engine.displayName()
+    }
+
+    /// Sends a voice-room signal on the room's group E2EE channel.
+    func sendVoiceRoomSignal(_ signal: VoiceRoomSignal, conversationID: UUID) async throws {
+        guard let groupID = await groupIDForConversation(conversationID) else { return }
+        let message = GroupControlMessage(
+            groupID: groupID,
+            epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+            kind: "voiceRoom",
+            voiceRoomSignal: try JSONEncoder().encode(signal)
+        )
+        try await sendGroupControl(
+            conversationID: conversationID,
+            groupID: groupID,
+            message: message
+        )
+    }
+
+    /// Routes one inbound voice-room signal to the room manager.
+    private func handleVoiceRoomSignal(_ signal: VoiceRoomSignal) async {
+        await voiceRooms.handle(signal: signal)
+    }
+
+    // MARK: - Linked devices (transport)
+
+    /// Binds a device-link mailbox (pairing handshake or paired channel).
+    func bindDeviceLinkMailbox(_ mailbox: Data, channel: DeviceLinkChannel) async {
+        await bind(mailbox: mailbox, route: .deviceLink(channel: channel))
+    }
+
+    func unbindDeviceLinkMailbox(_ mailbox: Data) async {
+        await unbind(mailbox: mailbox)
+    }
+
+    /// Sends one frame on a device-link mailbox. Pairing and paired-channel
+    /// payloads are already encrypted by the DeviceLinkManager; the relay
+    /// only sees opaque bytes on an unguessable mailbox.
+    func sendDeviceLinkFrame(_ payload: Data, mailbox: Data) async throws {
+        try await sendRaw(payload, mailbox: mailbox, ttl: 300, flags: 0)
     }
 
     // MARK: - Startup
@@ -610,6 +677,8 @@ actor AegisCore {
                 try await handleDirectFrame(frame: frame, peerFingerprint: fingerprint)
             case .group(let groupID, let conversationID):
                 try await handleGroupFrame(frame: frame, groupID: groupID, conversationID: conversationID)
+            case .deviceLink(let channel):
+                await deviceLink.handleDeviceLinkFrame(frame.payload, channel: channel)
             }
         } catch {
             // Untrusted network: drop undecryptable frames silently.
@@ -1011,6 +1080,15 @@ actor AegisCore {
                let mailbox = try? await engine.groupRoutingMailbox(groupID: groupID)
             {
                 _ = await retransmitBlob(uploadID: uploadID, mailbox: mailbox)
+            }
+        case "voiceRoom":
+            // Voice-room mesh signaling. The sender-key channel already
+            // authenticates group membership; the signal itself carries the
+            // sender's fingerprint for roster matching.
+            if let body = control.voiceRoomSignal,
+               let signal = try? JSONDecoder().decode(VoiceRoomSignal.self, from: body)
+            {
+                await handleVoiceRoomSignal(signal)
             }
         default:
             break
@@ -1691,10 +1769,26 @@ actor AegisCore {
     /// Trickle-ICE: sends a locally gathered candidate to the peer inside
     /// an E2EE envelope. Called by the media engine's ICE callback.
     func sendIceCandidate(_ candidate: IceCandidate, for callID: UUID) async throws {
-        guard let context = activeCalls[callID],
-              let peer = await engine.identityPublic(forFingerprint: context.peerFingerprint)
-        else { return }
-        try await sendCallSignal(.ice(candidate), to: peer)
+        // 1:1 calls resolve the peer from the call context.
+        if let context = activeCalls[callID],
+           let peer = await engine.identityPublic(forFingerprint: context.peerFingerprint)
+        {
+            try await sendCallSignal(.ice(candidate), to: peer)
+            return
+        }
+        // Voice-room mesh peers route by the room manager's per-peer table.
+        let routes = await voiceRooms.peerRoutes
+        if let route = routes[callID] {
+            var signal = VoiceRoomSignal(
+                kind: .ice,
+                roomID: route.roomID.uuidString,
+                senderFingerprintHex: voiceRoomLocalFingerprintHex() ?? ""
+            )
+            signal.targetFingerprintHex = route.peerFingerprintHex
+            signal.callID = callID.uuidString
+            signal.ice = candidate
+            try await sendVoiceRoomSignal(signal, conversationID: route.roomID)
+        }
     }
 
     // MARK: - Media controls (forwarded to the attached WebRTC engine)
@@ -1931,6 +2025,8 @@ actor AegisCore {
                   let mailbox = try? await engine.directRoutingMailbox(peer: peer)
             else { return }
             try? await sendRaw(inner.wire, mailbox: mailbox, ttl: 7 * 24 * 3600, flags: AegisFrame.flagTransportControl)
+        case .deviceLink:
+            break // blob redelivery is not a device-link concern
         }
     }
 

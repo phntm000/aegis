@@ -299,6 +299,10 @@ actor CryptoEngine {
     private var preKeyManager: PreKeyManager?
     private var localDisplayName: String = ""
 
+    /// The display name chosen at onboarding (used for voice-room presence
+    /// and device-link announcements).
+    func displayName() -> String { localDisplayName }
+
     /// Resolves a fingerprint to the contact the user knows (for sealed
     /// sender verification and display). Wired by the factory to the store.
     private let contactIdentity: @Sendable (Data) async -> IdentityPublic?
