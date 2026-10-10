@@ -350,7 +350,7 @@ actor AegisCore {
         // Group sender-key sessions: without this every group/channel
         // silently stopped working after an app restart.
         let groupSessionRepo = pkgStore.groupSessions
-        await engine.configureGroupPersistence(GroupPersistence(
+        await engine.configureGroupPersistence(CryptoEngine.GroupPersistence(
             save: { groupID, envelope in
                 try? await groupSessionRepo.saveGroupSession(groupID: groupID, snapshot: envelope)
             },

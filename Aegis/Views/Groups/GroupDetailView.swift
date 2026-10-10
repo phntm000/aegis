@@ -106,6 +106,36 @@ struct GroupDetailView: View {
                     }
                     .disabled(viewModel.isWorking)
                 }
+
+                if !viewModel.joinRequests.isEmpty {
+                    Section("Join requests (\(viewModel.joinRequests.count))") {
+                        ForEach(viewModel.joinRequests) { request in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(request.requesterName)
+                                        .font(AegisType.body)
+                                        .foregroundStyle(AegisColors.textPrimary)
+                                    Text("Wants to join this \(viewModel.isChannel ? "channel" : "group")")
+                                        .font(AegisType.caption)
+                                        .foregroundStyle(AegisColors.textSecondary)
+                                }
+                                Spacer()
+                                Button("Decline") {
+                                    viewModel.declineJoinRequest(request)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(AegisColors.textSecondary)
+                                Button("Approve") {
+                                    Task { @MainActor in await viewModel.approveJoinRequest(request) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(AegisColors.accent)
+                                .disabled(viewModel.isWorking)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
             }
 
             Section("Members (\(info.memberCount))") {

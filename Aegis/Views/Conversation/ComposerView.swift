@@ -47,6 +47,32 @@ struct ComposerView: View {
                     .padding(.horizontal, AegisLayout.l)
                     .padding(.bottom, AegisLayout.xs)
             }
+
+            ForEach(viewModel.failedUploads) { upload in
+                HStack(spacing: AegisLayout.s) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(AegisColors.danger)
+                    Text("Couldn't send \(upload.displayName)")
+                        .font(AegisType.caption)
+                        .foregroundStyle(AegisColors.textSecondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Retry") {
+                        Task { @MainActor in await viewModel.retryUpload(upload) }
+                    }
+                    .font(AegisType.captionStrong)
+                    .foregroundStyle(AegisColors.accent)
+                    .accessibilityLabel("Retry upload of \(upload.displayName)")
+                    Button("Dismiss") {
+                        viewModel.discardUpload(upload)
+                    }
+                    .font(AegisType.caption)
+                    .foregroundStyle(AegisColors.textSecondary)
+                    .accessibilityLabel("Dismiss failed upload")
+                }
+                .padding(.horizontal, AegisLayout.l)
+                .padding(.bottom, AegisLayout.xs)
+            }
         }
         .background(AegisColors.surfaceElevated)
         .overlay(alignment: .top) {

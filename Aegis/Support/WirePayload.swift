@@ -17,6 +17,12 @@ struct WirePayload: Codable, Sendable {
         case readReceipt
         case typing
         case screenshotNotice
+        /// A request to join a group/channel, sent 1:1 (X3DH) to the
+        /// inviter after redeeming an `aegis-group:` invite code. The
+        /// inviter's app surfaces it for approval; approval triggers the
+        /// normal `inviteMember` flow (real invite + sender-key
+        /// distributions). Never rendered as a chat message.
+        case groupJoinRequest
     }
 
     var version: Int
@@ -48,6 +54,12 @@ struct WirePayload: Codable, Sendable {
     /// only a hint — the recipient still verifies out-of-band before trusting
     /// the new key.
     var previousFingerprint: Data?
+
+    // Group join-request fields (kind == .groupJoinRequest only).
+    /// The inviter's conversation UUID (from the redeemed invite code).
+    var joinGroupReference: String?
+    /// The requester's display name, for the approval UI.
+    var joinRequesterName: String?
 
     init(kind: Kind) {
         self.version = Self.currentVersion

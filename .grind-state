@@ -1,9 +1,9 @@
 # Aegis grind state — updated by workers and the grind watchdog cron.
 # Format: key: value, one per line. Workers update current_item and last_activity_utc.
 
-current_item: fix6-webrtc-investigation
-current_item_started_utc: 2026-10-10T08:08:55Z
-last_activity_utc: 2026-10-10T09:11:11Z
+current_item: phase2-groups-media
+current_item_started_utc: 2026-10-10T09:28:00Z
+last_activity_utc: 2026-10-10T09:28:00Z
 last_commit_seen: none
 queue:
   - fix1-sqlcipher-store
@@ -34,3 +34,5 @@ fix5-identity-change-detection: done — inbound identity-change detection: send
   - ci-fix 2026-10-10T08:52Z: run 38038566688 (concurrent worker's d570f88e, built on my 1853977a in the shared worktree) still red with 3 errors: (1) RemoteVideoView Task-@MainActor closure cannot capture non-Sendable CMSampleBuffer → added private @unchecked Sendable box (sample buffers are immutable post-creation; documented) + split enqueue into @MainActor helper; (2)(3) createOffer/createAnswer sent non-Sendable RTCSessionDescription across withCheckedThrowingContinuation → extract the SDP String inside the callback, rebuild RTCSessionDescription after. Adopted the concurrent worker's setSpeaker fix (overrideOutputAudioPort throws in M154) which was already in the shared tree. Pushing now.
   - CI GREEN on run 38039068163 (commit 0b574573, concurrent worker's SendableSampleBuffer(value:) label fix on top of my 1438c27e): all 3 jobs pass — iOS app (XcodeGen + xcodebuild simulator build, links the real WebRTC M154 binary), Swift packages (build+test), Relay self-test.
   - fix6-webrtc-investigation: done — real WebRTC media engine on stasel/WebRTC M154 SwiftPM binary (URL+checksum pinned, CI-verified download); full E2EE signaling + real SDP/ICE, 5 media controls, remote video via RTCVideoRenderer→CMSampleBuffer→CallMediaRouter→VideoSink; CI green.
+  - watchdog 2026-10-10T09:28:00Z: fix6 done note observed; advanced current_item to phase2-groups-media. Phase 2 work ALREADY in flight without a watchdog spawn (fix6 worker self-continued or earlier spawn): remote commits 5e5e6415..28137f89 landed 09:11–09:25 UTC on remote main (latest 1.5 min before this check), uncommitted Phase 2 changes in this worktree. CI red on runs 38040514890–38041315590 (iOS app build job failing; packages + relay green) is being actively iterated by that worker — commits every 2–4 min. Per AGENTS.md did NOT spawn a second push-to-main phase2 worker. If liveness fades (>20 min no commits/state), next watchdog run should spawn a phase2 worker with the phase2-groups-media brief + footer, including the current failing step ('Build & test app (simulator, unsigned)').
+  - MILESTONE: Phase 1 MVP complete — fix1..fix6 all have done notes. Reportable to user per 2026-10-10 reporting policy.

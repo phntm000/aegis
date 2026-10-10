@@ -156,10 +156,11 @@ final class AppState: ObservableObject {
         // Recipient keys: DM peer's key, or group members' keys.
         let contacts = (try? await store.fetchContacts()) ?? []
         let recipientKeys: [Data]
-        if conversation.kind == .direct,
-           let peerID = conversation.peerContactID,
-           let peerKey = contacts.first(where: { $0.id == peerID })?.identityKey {
-            recipientKeys = [peerKey]
+        if conversation.kind == .direct {
+            // DM: the peer is the member who isn't us.
+            let peerID = conversation.memberIDs.first { $0 != message.senderID }
+            let peerKey = peerID.flatMap { id in contacts.first(where: { $0.id == id })?.identityKey }
+            recipientKeys = peerKey.map { [$0] } ?? []
         } else {
             recipientKeys = conversation.memberIDs.compactMap { id in
                 contacts.first { $0.id == id }?.identityKey

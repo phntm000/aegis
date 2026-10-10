@@ -20,4 +20,13 @@ enum AegisPaths {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
+
+    /// Recently-uploaded ciphertext blobs, kept for re-transmission when a
+    /// downloader's chunks never arrive (LAN transports don't retain
+    /// frames). Bounded by the uploader (see AegisCore.sentBlobCache).
+    static var sentBlobDirectory: URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("AegisSentBlobs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 }
