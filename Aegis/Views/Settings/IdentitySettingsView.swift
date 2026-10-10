@@ -90,7 +90,6 @@ struct IdentitySettingsView: View {
                     }
                     .accessibilityLabel("Share invite code")
                 }
-            }
 
             Section {
                 Button {
@@ -150,7 +149,6 @@ struct IdentitySettingsView: View {
                 backupData = await viewModel.exportBackup(passphrase: passphrase)
                 showingBackupSheet = false
             }
-        }
         .confirmationDialog("Delete your identity?", isPresented: $showingDeleteConfirm, titleVisibility: .visible) {
             Button("Delete everything", role: .destructive) {
                 Task { @MainActor in await viewModel.deleteIdentity() }

@@ -54,6 +54,8 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Preferences")
+                } footer: {
+                    EmptyView()
                 }
 
                 Section {
@@ -66,6 +68,8 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Data & network")
+                } footer: {
+                    EmptyView()
                 }
 
                 Section {
@@ -74,6 +78,8 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("About")
+                } footer: {
+                    EmptyView()
                 }
             }
             .listStyle(.insetGrouped)
