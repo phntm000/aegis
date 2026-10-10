@@ -388,17 +388,18 @@ actor AegisCore {
         Task { await self.consumeCoordinatorEvents(generation: generation) }
         Task { await self.watchTransportStates(generation: generation) }
         Task { await self.watchRelayHealth(generation: generation) }
-        if let urlString = effectiveRelayURL, let liveRelay = newRelay {
-            let configuredAt = Date()
+        if let urlString = effectiveRelayURL, let url = URL(string: urlString) {
             relayHealth = RelayHealth(
                 url: urlString, status: .checking,
                 detail: "Probing relay…"
             )
+            // Immediate one-shot probe on a transient socket: a definitive
+            // reachable/unreachable verdict without disturbing the live
+            // transport. watchRelayHealth keeps the readout honest afterwards.
             Task { [weak self] in
-                await self?.watchRelayHellos(
-                    relay: liveRelay, urlString: urlString,
-                    configuredAt: configuredAt, generation: generation
-                )
+                let result = await RelayProbe.handshake(url: url)
+                guard let self else { return }
+                await self.applyProbeResult(urlString: urlString, result: result, generation: generation)
             }
         } else {
             relayHealth = nil
@@ -413,50 +414,23 @@ actor AegisCore {
     /// The relay URL the current mode resolved to, if any.
     func getEffectiveRelayURL() async -> String? { effectiveRelayURL }
 
-    /// Waits for the live relay's first protocol hello — proof it speaks our
-    /// protocol, not just that a TCP/TLS handshake succeeded. On hello: marks
-    /// the relay reachable and records it as last-known-good. On timeout: marks
-    /// unreachable (the transport keeps retrying with backoff; the periodic
-    /// probe keeps the readout honest).
-    private func watchRelayHellos(
-        relay: RelayTransport,
-        urlString: String,
-        configuredAt: Date,
-        generation: Int
-    ) async {
-        let helloSeen: Bool = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                for await event in relay.events {
-                    if case .hello = event { return true }
-                }
-                return false
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
+    /// Applies a probe result to the health readout. Generation-guarded so a
+    /// stale probe can never overwrite a newer configuration. A verified relay
+    /// becomes automatic mode's fallback.
+    private func applyProbeResult(urlString: String, result: RelayProbeResult, generation: Int) async {
         guard generation == consumeGeneration else { return }
-        if helloSeen {
-            let ms = Int(Date().timeIntervalSince(configuredAt) * 1000)
-            relayHealth = RelayHealth(
-                url: urlString, status: .reachable, latencyMs: ms,
-                lastCheckedAt: Date(), detail: "Relay handshake OK"
-            )
-            lastKnownGoodRelayURL = urlString
-        } else if relayHealth?.status == .checking {
-            relayHealth = RelayHealth(
-                url: urlString, status: .unreachable, lastCheckedAt: Date(),
-                detail: "No handshake from relay yet — retrying in background"
-            )
-        }
+        relayHealth = RelayHealth(
+            url: urlString,
+            status: result.reachable ? .reachable : .unreachable,
+            latencyMs: result.latencyMs,
+            lastCheckedAt: Date(),
+            detail: result.detail
+        )
+        if result.reachable { lastKnownGoodRelayURL = urlString }
         connectionCont.yield(currentConnectionStateSync())
     }
 
-    /// Periodic one-shot handshake probe on a transient transport — never
+    /// Periodic one-shot handshake probe on a transient socket — never
     /// disturbs the live connection. Keeps the Settings health readout honest
     /// when the live transport is down or still checking.
     private func watchRelayHealth(generation: Int) async {
@@ -466,16 +440,7 @@ actor AegisCore {
             guard let urlString = effectiveRelayURL, let url = URL(string: urlString) else { continue }
             if relayHealth?.status == .reachable, relay?.currentState == .connected { continue }
             let result = await RelayProbe.handshake(url: url)
-            guard generation == consumeGeneration else { return }
-            relayHealth = RelayHealth(
-                url: urlString,
-                status: result.reachable ? .reachable : .unreachable,
-                latencyMs: result.latencyMs,
-                lastCheckedAt: Date(),
-                detail: result.detail
-            )
-            if result.reachable { lastKnownGoodRelayURL = urlString }
-            connectionCont.yield(currentConnectionStateSync())
+            await applyProbeResult(urlString: urlString, result: result, generation: generation)
         }
     }
 

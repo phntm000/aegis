@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Relay configuration: automatic, LAN-only, or a self-hosted relay.

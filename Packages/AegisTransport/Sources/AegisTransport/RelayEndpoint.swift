@@ -14,7 +14,7 @@ import Foundation
 // MARK: Validation
 
 /// Why a user-typed relay URL was rejected. Descriptions are user-facing.
-public enum RelayURLValidationError: Sendable, Equatable, CustomStringConvertible {
+public enum RelayURLValidationError: Error, Sendable, Equatable, CustomStringConvertible {
     case empty
     case unparseable(String)
     case unsupportedScheme(String)
@@ -161,35 +161,68 @@ public struct RelayProbeResult: Sendable {
 // MARK: - One-shot handshake probe
 
 public enum RelayProbe {
-    /// Opens a transient RelayTransport, waits for the server's hello (proof
-    /// it speaks our protocol), then tears it down. Never touches the live
-    /// transport — safe to run for validation and periodic health checks.
+    /// Opens a transient WebSocket, sends the protocol ping (the same opening
+    /// move `RelayTransport` makes), waits for the server's hello — proof it
+    /// speaks our protocol — then tears everything down. Never touches the
+    /// live transport, so it is safe for URL validation and periodic health
+    /// checks.
+    ///
+    /// Implementation note: the watcher task cannot be cancelled out of a
+    /// suspended `URLSessionWebSocketTask.receive()` via task cancellation
+    /// alone, so the timeout arm cancels the *socket*, which forces
+    /// `receive()` to throw and lets the task group finish. No leaked tasks.
+    ///
+    /// The probe does not do certificate pinning — it only asserts protocol
+    /// reachability. The live `RelayTransport` owns authenticated/pinned
+    /// connections.
     public static func handshake(url: URL, timeout: TimeInterval = 15) async -> RelayProbeResult {
-        let probe = RelayTransport(url: url)
+        let session = URLSession(configuration: .default)
+        let socket = session.webSocketTask(with: url)
+        socket.resume()
         let start = Date()
-        await probe.start()
-        defer { Task { await probe.stop() } }
+        // URLSessionTask is thread-safe per Apple, but not formally Sendable;
+        // box it for the @Sendable group tasks.
+        final class SocketBox: @unchecked Sendable {
+            let socket: URLSessionWebSocketTask
+            init(_ socket: URLSessionWebSocketTask) { self.socket = socket }
+        }
+        let box = SocketBox(socket)
 
-        let outcome: RelayProbeResult? = await withTaskGroup(of: RelayProbeResult?.self) { group in
+        let outcome: RelayProbeResult = await withTaskGroup(of: RelayProbeResult?.self) { group in
             group.addTask {
-                for await event in probe.events {
-                    if case .hello = event {
-                        let ms = Int(Date().timeIntervalSince(start) * 1000)
-                        return RelayProbeResult(
-                            reachable: true,
-                            latencyMs: ms,
-                            detail: "Relay handshake OK"
-                        )
+                do {
+                    try await box.socket.send(.string(RelayClientOp.ping.encode()))
+                    let deadline = Date().addingTimeInterval(timeout)
+                    while Date() < deadline {
+                        let message = try await box.socket.receive()
+                        guard case .string(let text) = message else { continue }
+                        if case .hello = RelayServerMessage.parse(text) {
+                            let ms = Int(Date().timeIntervalSince(start) * 1000)
+                            return RelayProbeResult(
+                                reachable: true,
+                                latencyMs: ms,
+                                detail: "Relay handshake OK"
+                            )
+                        }
+                        // acks/pongs/etc. are not the handshake; keep waiting.
                     }
+                    return RelayProbeResult(
+                        reachable: false,
+                        latencyMs: nil,
+                        detail: "No handshake from relay (\(Int(timeout))s timeout)"
+                    )
+                } catch {
+                    return RelayProbeResult(
+                        reachable: false,
+                        latencyMs: nil,
+                        detail: "Connection failed: \(error.localizedDescription)"
+                    )
                 }
-                return RelayProbeResult(
-                    reachable: false,
-                    latencyMs: nil,
-                    detail: "Probe ended without a handshake"
-                )
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // Force any suspended receive() to throw so the watcher ends.
+                box.socket.cancel(with: .goingAway, reason: nil)
                 return RelayProbeResult(
                     reachable: false,
                     latencyMs: nil,
@@ -198,12 +231,16 @@ public enum RelayProbe {
             }
             let first = await group.next() ?? nil
             group.cancelAll()
-            return first
+            // If the watcher won, the socket is still open: close it so the
+            // cancelled timeout task cannot linger on a live socket.
+            box.socket.cancel(with: .goingAway, reason: nil)
+            return first ?? RelayProbeResult(
+                reachable: false,
+                latencyMs: nil,
+                detail: "Probe ended without a handshake"
+            )
         }
-        return outcome ?? RelayProbeResult(
-            reachable: false,
-            latencyMs: nil,
-            detail: "Probe ended without a handshake"
-        )
+        session.finishTasksAndInvalidate()
+        return outcome
     }
 }
