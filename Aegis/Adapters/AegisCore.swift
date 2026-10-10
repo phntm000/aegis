@@ -414,11 +414,11 @@ actor AegisCore {
         }
     }
 
-    private func handleDirectFrame(_ frame: AegisFrame, peerFingerprint: Data) async throws {
+    private func handleDirectFrame(frame: AegisFrame, peerFingerprint: Data) async throws {
         guard let peer = await engine.identityPublic(forFingerprint: peerFingerprint) else { return }
         if frame.flags & AegisFrame.flagTransportControl != 0 {
             // Transport-internal: the core consumes it fully.
-            let plaintext = try engine.decryptDirect(frame.payload, from: peer)
+            let plaintext = try await engine.decryptDirect(frame.payload, from: peer)
             // Distributions are detected by parse (the engine sends them
             // as encryptDirect(distribution.serialized()) with no JSON
             // wrapper); everything else is a TransportControl envelope.
@@ -729,9 +729,10 @@ actor AegisCore {
         try await upsertMembership(conversationID: conversationID, fingerprint: peer.fingerprint, role: "member")
         try await distribute(distributions)
         // Invite + control message.
+        let currentEpoch = await engine.groupEpoch(groupID: groupID) ?? 0
         let invite = GroupInviteInfo(
             groupID: groupID,
-            epoch: engine.groupEpoch(groupID: groupID) ?? 0,
+            epoch: currentEpoch,
             name: "", topic: nil,
             members: [peer.fingerprint.hexString: ""]
         )

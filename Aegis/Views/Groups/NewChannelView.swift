@@ -36,6 +36,8 @@ struct NewChannelView: View {
                                 .foregroundStyle(AegisColors.textSecondary)
                         }
                     }
+                } header: {
+                    EmptyView()
                 } footer: {
                     Text("Turn this off to make a discussion channel where every member can post.")
                 }

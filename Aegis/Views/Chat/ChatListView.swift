@@ -149,11 +149,13 @@ struct ChatListView: View {
                 }
             } header: {
                 if !viewModel.pinned.isEmpty { Text("Chats") }
+            } footer: {
+                EmptyView()
             }
 
             if !viewModel.archived.isEmpty {
                 Section {
-                    NavigationLink(value: ArchivedDestination.self) {
+                    NavigationLink(value: ArchivedDestination()) {
                         Label("Archived", systemImage: "archivebox.fill")
                             .badge(viewModel.archived.count)
                     }

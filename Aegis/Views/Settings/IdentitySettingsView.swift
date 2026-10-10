@@ -176,6 +176,8 @@ private struct BackupExportSheet: View {
                     SecureField("Backup passphrase", text: $passphrase)
                         .textContentType(.newPassword)
                         .accessibilityLabel("Backup passphrase")
+                } header: {
+                    EmptyView()
                 } footer: {
                     Text("Choose a strong passphrase. You'll need it to restore this backup.")
                 }

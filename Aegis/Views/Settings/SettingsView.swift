@@ -15,9 +15,7 @@ struct SettingsView: View {
             List {
                 // Identity card
                 Section {
-                    NavigationLink {
-                        IdentitySettingsView(appState: appState)
-                    } label: {
+                    NavigationLink(destination: IdentitySettingsView(appState: appState)) {
                         HStack(spacing: AegisLayout.m) {
                             if let identity = viewModel.identity {
                                 AvatarView(displayName: identity.displayName, hue: 0.58, size: AegisLayout.avatarM)

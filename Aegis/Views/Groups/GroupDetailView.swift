@@ -267,6 +267,8 @@ private struct TopicEditorSheet: View {
                 Section {
                     TextField("Description", text: $text, axis: .vertical)
                         .lineLimit(3...6)
+                } header: {
+                    EmptyView()
                 } footer: {
                     Text("Shown to members at the top of the info screen.")
                 }

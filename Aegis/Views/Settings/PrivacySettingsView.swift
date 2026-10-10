@@ -19,6 +19,8 @@ struct PrivacySettingsView: View {
                     )
                 }
                 .accessibilityLabel("Sealed sender")
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Metadata resistance. Slightly more bandwidth, meaningfully more privacy.")
             }
@@ -57,6 +59,8 @@ struct PrivacySettingsView: View {
                     )
                 }
                 .accessibilityLabel("Screenshot alerts")
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Screenshots can't be prevented — but they shouldn't be silent either.")
             }
@@ -102,6 +106,8 @@ struct AppearanceSettingsView: View {
                     }
                     .accessibilityLabel("\(mode.displayName) appearance")
                 }
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Aegis is designed dark-first, but both themes are first-class.")
             }

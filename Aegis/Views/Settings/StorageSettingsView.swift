@@ -51,6 +51,8 @@ struct StorageSettingsView: View {
                     Label("Clear caches", systemImage: "trash")
                 }
                 .accessibilityHint("Removes thumbnails and temporary files. Messages are kept.")
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Clears thumbnails, staged uploads, and downloaded files that can be re-fetched. Your messages, contacts, and identity are untouched.")
             }

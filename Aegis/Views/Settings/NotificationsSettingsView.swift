@@ -46,6 +46,8 @@ struct NotificationsSettingsView: View {
                     .font(AegisType.callout)
                     .foregroundStyle(AegisColors.accent)
                 }
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Notifications are generated on this device when messages arrive. There is no push server and no third party ever sees them.")
             }
@@ -133,6 +135,8 @@ struct AppLockSettingsView: View {
                         .font(AegisType.footnote)
                         .foregroundStyle(AegisColors.danger)
                 }
+            } header: {
+                EmptyView()
             } footer: {
                 Text("Biometric data never leaves your device — authentication is handled by iOS, and Aegis never sees it.")
             }

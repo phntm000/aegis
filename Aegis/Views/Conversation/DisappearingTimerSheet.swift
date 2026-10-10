@@ -53,6 +53,8 @@ struct DisappearingTimerSheet: View {
                         }
                         .accessibilityLabel("Disappearing messages: \(option.label)")
                     }
+                } header: {
+                    EmptyView()
                 } footer: {
                     Text("When enabled, new messages disappear from both devices after the timer elapses. It doesn't prevent screenshots — use screenshot alerts for that.")
                 }
