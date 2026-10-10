@@ -1120,14 +1120,14 @@ actor AegisCore {
                 await unbind(mailbox: mailbox.bytes)
             }
         }
-        let cid = packageID(conversationID)
+        let cid: AegisStore.ConversationID = packageID(conversationID)
         if let local = try? await engine.localPublicIdentity() {
             try? await pkgStore.memberships.remove(
                 conversationID: cid, userID: AegisStore.UserID(local.fingerprint.hexString))
         }
         var sidecar = await sidecars.load(id: conversationID)
         sidecar.cryptoGroupID = nil
-        try await sidecars.save(id: conversationID, sidecar: sidecar)
+        try? await sidecars.save(id: conversationID, sidecar: sidecar)
     }
 
     // MARK: - Conversation resolution
