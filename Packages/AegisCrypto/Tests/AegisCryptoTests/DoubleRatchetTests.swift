@@ -105,6 +105,11 @@ final class DoubleRatchetTests: XCTestCase {
     func testTamperedCiphertextFails() throws {
         let (alice, bob) = try makeSessionPair()
         let message = try alice.encrypt(plaintext: Data("secret".utf8))
+        print("DIAG tamper-test: ct=\(message.ciphertext.count) nonce=\(message.nonce.count) tag=\(message.tag.count)")
+        guard !message.ciphertext.isEmpty else {
+            XCTFail("ciphertext is empty — cannot tamper index 0")
+            return
+        }
         var tampered = message.ciphertext
         tampered[0] ^= 0x01
         let forged = RatchetMessage(header: message.header, nonce: message.nonce, ciphertext: tampered, tag: message.tag)
