@@ -40,18 +40,10 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent) {
-                        PrivacySettingsView()
-                    }
-                    settingsRow(icon: "paintbrush.fill", title: "Appearance", color: Color.purple) {
-                        AppearanceSettingsView()
-                    }
-                    settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger) {
-                        NotificationsSettingsView(appState: appState)
-                    }
-                    settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success) {
-                        AppLockSettingsView(appState: appState)
-                    }
+                    settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent, destination: AnyView(PrivacySettingsView()))
+                    settingsRow(icon: "paintbrush.fill", title: "Appearance", color: Color.purple, destination: AnyView(AppearanceSettingsView()))
+                    settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger, destination: AnyView(NotificationsSettingsView(appState: appState)))
+                    settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success, destination: AnyView(AppLockSettingsView(appState: appState)))
                 } header: {
                     Text("Preferences")
                 } footer: {
@@ -60,12 +52,8 @@ struct SettingsView: View {
 
                 Section {
 
-                    settingsRow(icon: "internaldrive.fill", title: "Storage", color: AegisColors.textSecondary) {
-                        StorageSettingsView(appState: appState)
-                    }
-                    settingsRow(icon: "server.rack", title: "Relay", color: AegisColors.warning) {
-                        RelaySettingsView(appState: appState)
-                    }
+                    settingsRow(icon: "internaldrive.fill", title: "Storage", color: AegisColors.textSecondary, destination: AnyView(StorageSettingsView(appState: appState)))
+                    settingsRow(icon: "server.rack", title: "Relay", color: AegisColors.warning, destination: AnyView(RelaySettingsView(appState: appState)))
                 } header: {
                     Text("Data & network")
                 } footer: {
@@ -73,9 +61,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    settingsRow(icon: "info.circle.fill", title: "About Aegis", color: AegisColors.textSecondary) {
-                        AboutView()
-                    }
+                    settingsRow(icon: "info.circle.fill", title: "About Aegis", color: AegisColors.textSecondary, destination: AnyView(AboutView()))
                 } header: {
                     Text("About")
                 } footer: {
@@ -93,14 +79,13 @@ struct SettingsView: View {
         }
     }
 
-    private func settingsRow<Destination: View>(
+    private func settingsRow(
         icon: String,
         title: String,
         color: Color,
-        @ViewBuilder destination: () -> Destination
-    ) -> AnyView {
-        AnyView(
-            NavigationLink(destination: destination()) {
+        destination: AnyView
+    ) -> some View {
+        NavigationLink(destination: destination) {
             HStack(spacing: AegisLayout.m) {
                 Image(systemName: icon)
                     .font(.system(size: 15))
@@ -116,7 +101,6 @@ struct SettingsView: View {
             .padding(.vertical, 2)
         }
         .accessibilityLabel("\(title) settings")
-        )
     }
 }
 
