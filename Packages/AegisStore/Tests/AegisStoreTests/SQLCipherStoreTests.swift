@@ -615,8 +615,8 @@ final class SQLCipherStoreTests: XCTestCase {
         try await migrated.groupSessions.saveGroupSession(groupID: "bb", snapshot: Data([0x02]))
         let loaded = try await migrated.groupSessions.loadAllGroupSessions()
         XCTAssertEqual(loaded["bb"], Data([0x02]))
-        try await migrated.attachmentContexts.save(keyHash: "k", groupID: nil, peer: Data([0x09]))
-        let ctx = try await migrated.attachmentContexts.load(keyHash: "k")
+        try await migrated.attachmentContexts.saveAttachmentContext(keyHash: "k", groupID: nil, peer: Data([0x09]))
+        let ctx = try await migrated.attachmentContexts.loadAttachmentContext(keyHash: "k")
         XCTAssertNil(ctx?.groupID)
         XCTAssertEqual(ctx?.peer, Data([0x09]))
     }
