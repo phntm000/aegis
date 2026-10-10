@@ -131,7 +131,9 @@ CREATE VIRTUAL TABLE message_fts USING fts5(
     transcription,
     content='message',
     content_rowid='rowid',
-    tokenize='unicode61 "remove_diacritics 2"'
+    tokenize='unicode61'  -- bare unicode61: diacritic folding is its default;
+                         -- quoted tokenizer args fail to parse on this
+                         -- SQLite/SQLCipher build ("parse error in tokenize directive")
 );
 
 CREATE TRIGGER message_fts_ai AFTER INSERT ON message BEGIN
