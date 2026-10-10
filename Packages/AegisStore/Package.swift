@@ -37,9 +37,9 @@ let package = Package(
                 .define("SQLITE_ENABLE_FTS5"),
                 // No loadable extensions in the encrypted store, ever.
                 .define("SQLITE_OMIT_LOAD_EXTENSION"),
-                .define("SQLITE_TEMP_STORE", .to("2")),
-                .define("SQLITE_THREADSAFE", .to("1")),
-                .define("SQLITE_DEFAULT_MEMSTATUS", .to("0")),
+                .define("SQLITE_TEMP_STORE", to: "2"),
+                .define("SQLITE_THREADSAFE", to: "1"),
+                .define("SQLITE_DEFAULT_MEMSTATUS", to: "0"),
             ]
         ),
         .target(
