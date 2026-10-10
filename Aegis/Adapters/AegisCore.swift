@@ -403,9 +403,9 @@ actor AegisCore {
         do {
             switch route {
             case .direct(let fingerprint):
-                try await handleDirectFrame(frame, peerFingerprint: fingerprint)
+                try await handleDirectFrame(frame: frame, peerFingerprint: fingerprint)
             case .group(let groupID, let conversationID):
-                try await handleGroupFrame(frame, groupID: groupID, conversationID: conversationID)
+                try await handleGroupFrame(frame: frame, groupID: groupID, conversationID: conversationID)
             }
         } catch {
             // Untrusted network: drop undecryptable frames silently.

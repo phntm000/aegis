@@ -45,28 +45,7 @@ struct ChatListView: View {
             .navigationBarTitleDisplayMode(.large)
             .searchable(text: $viewModel.searchText, prompt: "Search conversations")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button {
-                            showingAddContact = true
-                        } label: {
-                            Label("New direct message", systemImage: "person.fill.badge.plus")
-                        }
-                        Button {
-                            showingNewGroup = true
-                        } label: {
-                            Label("New group", systemImage: "person.2.fill")
-                        }
-                        Button {
-                            showingNewChannel = true
-                        } label: {
-                            Label("New channel", systemImage: "megaphone.fill")
-                        }
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .accessibilityLabel("New conversation")
-                    }
-                }
+                toolbarContent
             }
             .navigationDestination(for: Conversation.self) { conversation in
                 ConversationView(
@@ -132,6 +111,32 @@ struct ChatListView: View {
     }
 
     // MARK: - List
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button {
+                    showingAddContact = true
+                } label: {
+                    Label("New direct message", systemImage: "person.fill.badge.plus")
+                }
+                Button {
+                    showingNewGroup = true
+                } label: {
+                    Label("New group", systemImage: "person.2.fill")
+                }
+                Button {
+                    showingNewChannel = true
+                } label: {
+                    Label("New channel", systemImage: "megaphone.fill")
+                }
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .accessibilityLabel("New conversation")
+            }
+        }
+    }
 
     private var chatList: some View {
         List {
