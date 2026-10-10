@@ -84,7 +84,8 @@ final class SQLCipherStoreTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(
             try SQLCipherAegisStore.openForTesting(at: dbPath, key: wrongKey)
         ) { error in
-            guard case AegisStoreError.encryptionUnavailable = error as? AegisStoreError else {
+            guard let storeError = error as? AegisStoreError,
+                  case .encryptionUnavailable = storeError else {
                 XCTFail("expected .encryptionUnavailable, got \(error)")
                 return
             }
@@ -106,10 +107,14 @@ final class SQLCipherStoreTests: XCTestCase {
 
         let reopened = try await reopen()
 
-        XCTAssertEqual(try await reopened.conversations.fetch(id: c.id)?.title, "persist me")
-        XCTAssertEqual(try await reopened.messages.fetch(id: m.id)?.text, "survive restart")
-        XCTAssertEqual(try await reopened.conversations.fetch(id: c.id)?.unreadCount, 1)
-        XCTAssertEqual(try await reopened.contacts.fetch(id: contact.id)?.displayName, "Ada")
+        let reopenedTitle = try await reopened.conversations.fetch(id: c.id)?.title
+        XCTAssertEqual(reopenedTitle, "persist me")
+        let reopenedText = try await reopened.messages.fetch(id: m.id)?.text
+        XCTAssertEqual(reopenedText, "survive restart")
+        let reopenedUnread = try await reopened.conversations.fetch(id: c.id)?.unreadCount
+        XCTAssertEqual(reopenedUnread, 1)
+        let reopenedName = try await reopened.contacts.fetch(id: contact.id)?.displayName
+        XCTAssertEqual(reopenedName, "Ada")
     }
 
     // MARK: - Contract: conversations
@@ -148,7 +153,8 @@ final class SQLCipherStoreTests: XCTestCase {
     func testMarkReadZeroesUnread() async throws {
         let c = try await makeConversation()
         let m = try await makeMessage(in: c.id, direction: .incoming)
-        XCTAssertEqual(try await store.conversations.fetch(id: c.id)?.unreadCount, 1)
+        let unreadBefore = try await store.conversations.fetch(id: c.id)?.unreadCount
+        XCTAssertEqual(unreadBefore, 1)
         try await store.conversations.markRead(id: c.id, upTo: m.id)
         let after = try await store.conversations.fetch(id: c.id)
         XCTAssertEqual(after?.unreadCount, 0)
@@ -208,7 +214,8 @@ final class SQLCipherStoreTests: XCTestCase {
             if case .invalidArgument = error as? AegisStoreError { return }
             XCTFail("expected .invalidArgument, got \(error)")
         }
-        XCTAssertNotNil(try await store.messages.fetch(id: m.id)?.readAt)
+        let readAt = try await store.messages.fetch(id: m.id)?.readAt
+        XCTAssertNotNil(readAt)
     }
 
     func testReactions() async throws {
@@ -235,8 +242,9 @@ final class SQLCipherStoreTests: XCTestCase {
         XCTAssertEqual(fetched?.isTombstone, true)
         XCTAssertNil(fetched?.text)
         // Tombstones are excluded from search.
-        XCTAssertTrue(try await store.messages.search(
-            query: "delete me", in: nil, limit: 10).isEmpty)
+        let tombstoneHits = try await store.messages.search(
+            query: "delete me", in: nil, limit: 10)
+        XCTAssertTrue(tombstoneHits.isEmpty)
     }
 
     func testPendingOutboxOrdering() async throws {
@@ -251,7 +259,8 @@ final class SQLCipherStoreTests: XCTestCase {
                              text: "later",
                              scheduledFor: Date().addingTimeInterval(3600))
         try await store.messages.insert(future)
-        XCTAssertTrue(try await store.messages.pendingOutbox(now: Date()).isEmpty)
+        let scheduledOutbox = try await store.messages.pendingOutbox(now: Date())
+        XCTAssertTrue(scheduledOutbox.isEmpty)
         future.scheduledFor = Date().addingTimeInterval(-1)
         try await store.messages.update(future)
         let due = try await store.messages.pendingOutbox(now: Date())
@@ -294,8 +303,9 @@ final class SQLCipherStoreTests: XCTestCase {
                         text: "ephemeral secret",
                         disappearAt: Date().addingTimeInterval(-5))
         try await store.messages.insert(m)
-        XCTAssertTrue(try await store.messages.search(
-            query: "ephemeral", in: nil, limit: 10).isEmpty)
+        let expiredHits = try await store.messages.search(
+            query: "ephemeral", in: nil, limit: 10)
+        XCTAssertTrue(expiredHits.isEmpty)
     }
 
     // MARK: - Expunge
@@ -310,12 +320,15 @@ final class SQLCipherStoreTests: XCTestCase {
 
         let wiped = try await store.messages.expungeDisappeared(now: Date())
         XCTAssertEqual(wiped, 1)
-        XCTAssertNil(try await store.messages.fetch(id: expired.id))
-        XCTAssertTrue(try await store.messages.search(
-            query: "burn after", in: nil, limit: 10).isEmpty)
+        let expunged = try await store.messages.fetch(id: expired.id)
+        XCTAssertNil(expunged)
+        let burnHits = try await store.messages.search(
+            query: "burn after", in: nil, limit: 10)
+        XCTAssertTrue(burnHits.isEmpty)
         // Survivor untouched.
-        XCTAssertEqual(try await store.messages.search(
-            query: "keep me", in: nil, limit: 10).count, 1)
+        let keepHits = try await store.messages.search(
+            query: "keep me", in: nil, limit: 10)
+        XCTAssertEqual(keepHits.count, 1)
     }
 
     // MARK: - Cascade deletes
@@ -335,11 +348,16 @@ final class SQLCipherStoreTests: XCTestCase {
 
         try await store.conversations.delete(id: c.id)
 
-        XCTAssertNil(try await store.conversations.fetch(id: c.id))
-        XCTAssertNil(try await store.messages.fetch(id: m.id))
-        XCTAssertNil(try await store.attachments.fetch(id: attachment.id))
-        XCTAssertTrue(try await store.memberships.members(of: c.id).isEmpty)
-        XCTAssertTrue(try await store.calls.list(in: c.id, limit: 10).isEmpty)
+        let deletedConversation = try await store.conversations.fetch(id: c.id)
+        XCTAssertNil(deletedConversation)
+        let deletedMessage = try await store.messages.fetch(id: m.id)
+        XCTAssertNil(deletedMessage)
+        let deletedAttachment = try await store.attachments.fetch(id: attachment.id)
+        XCTAssertNil(deletedAttachment)
+        let remainingMembers = try await store.memberships.members(of: c.id)
+        XCTAssertTrue(remainingMembers.isEmpty)
+        let remainingCalls = try await store.calls.list(in: c.id, limit: 10)
+        XCTAssertTrue(remainingCalls.isEmpty)
     }
 
     // MARK: - Contacts / memberships / attachments / calls
@@ -355,8 +373,10 @@ final class SQLCipherStoreTests: XCTestCase {
         try await store.contacts.setBlocked(id: contact.id, blocked: true)
         fetched = try await store.contacts.fetch(id: contact.id)
         XCTAssertEqual(fetched?.isBlocked, true)
-        XCTAssertTrue(try await store.contacts.list(includeBlocked: false).isEmpty)
-        XCTAssertEqual(try await store.contacts.list(includeBlocked: true).count, 1)
+        let visibleContacts = try await store.contacts.list(includeBlocked: false)
+        XCTAssertTrue(visibleContacts.isEmpty)
+        let allContacts = try await store.contacts.list(includeBlocked: true)
+        XCTAssertEqual(allContacts.count, 1)
     }
 
     func testMembershipRoles() async throws {
@@ -364,16 +384,17 @@ final class SQLCipherStoreTests: XCTestCase {
         let user = UserID("member-1")
         try await store.memberships.upsert(GroupMembership(
             conversationID: c.id, userID: user, role: .member))
-        XCTAssertEqual(
-            try await store.memberships.role(of: user, in: c.id), .member)
+        let roleAfterUpsert = try await store.memberships.role(of: user, in: c.id)
+        XCTAssertEqual(roleAfterUpsert, .member)
         try await store.memberships.setRole(
             conversationID: c.id, userID: user, role: .admin)
-        XCTAssertEqual(
-            try await store.memberships.role(of: user, in: c.id), .admin)
-        XCTAssertEqual(
-            try await store.memberships.conversations(containing: user), [c.id])
+        let roleAfterPromote = try await store.memberships.role(of: user, in: c.id)
+        XCTAssertEqual(roleAfterPromote, .admin)
+        let containingConversations = try await store.memberships.conversations(containing: user)
+        XCTAssertEqual(containingConversations, [c.id])
         try await store.memberships.remove(conversationID: c.id, userID: user)
-        XCTAssertNil(try await store.memberships.role(of: user, in: c.id))
+        let roleAfterRemove = try await store.memberships.role(of: user, in: c.id)
+        XCTAssertNil(roleAfterRemove)
     }
 
     func testAttachmentProgressClampsAndCompletes() async throws {
@@ -408,7 +429,8 @@ final class SQLCipherStoreTests: XCTestCase {
         let fetched = try await store.calls.fetch(id: record.id)
         XCTAssertEqual(fetched?.recordingConsent[user], true)
         XCTAssertTrue(fetched?.allPartiesConsentedToRecording ?? false)
-        XCTAssertEqual(try await store.calls.list(in: c.id, limit: 5).count, 1)
+        let callList = try await store.calls.list(in: c.id, limit: 5)
+        XCTAssertEqual(callList.count, 1)
     }
 
     // MARK: - Transactions
@@ -462,9 +484,11 @@ final class SQLCipherStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: path2) }
         let fresh = try SQLCipherAegisStore.openForTesting(at: path2, key: testKey)
         try await fresh.restore(snapshot)
-        XCTAssertEqual(try await fresh.conversations.fetch(id: c.id)?.title, "backup")
-        XCTAssertEqual(try await fresh.messages.search(
-            query: "saved", in: nil, limit: 10).count, 1)
+        let restoredTitle = try await fresh.conversations.fetch(id: c.id)?.title
+        XCTAssertEqual(restoredTitle, "backup")
+        let restoredHits = try await fresh.messages.search(
+            query: "saved", in: nil, limit: 10)
+        XCTAssertEqual(restoredHits.count, 1)
 
         await XCTAssertThrowsErrorAsync(
             try await fresh.restore(StoreSnapshot(
