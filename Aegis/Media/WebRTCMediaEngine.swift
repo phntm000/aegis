@@ -335,13 +335,10 @@ extension WebRTCMediaEngine: CallMediaControl {
         let session = RTCAudioSession.sharedInstance()
         session.lockForConfiguration()
         defer { session.unlockForConfiguration() }
-        // M154's overrideOutputAudioPort returns Void; the only failure
-        // signal is a read-back of the applied route.
-        session.overrideOutputAudioPort(enabled ? .speaker : .none)
-        let expected: AVAudioSession.PortOverride = enabled ? .speaker : .none
-        guard session.outputAudioPort == expected else {
-            throw EngineError.sdpFailure("speaker route change was not applied by the audio session")
-        }
+        // Throws when the route change is rejected; the error propagates
+        // to the caller (the call UI surfaces it) instead of silently
+        // doing nothing.
+        try session.overrideOutputAudioPort(enabled ? .speaker : .none)
     }
 
     func startScreenShare(callID: UUID) async throws {
