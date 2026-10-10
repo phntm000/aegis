@@ -23,7 +23,7 @@ struct PrivacySettingsView: View {
                 Text("Metadata resistance. Slightly more bandwidth, meaningfully more privacy.")
             }
 
-            Section("Defaults for new chats") {
+            Section {
                 Toggle(isOn: $readReceiptsDefault) {
                     settingLabel(
                         title: "Read receipts",
@@ -43,6 +43,8 @@ struct PrivacySettingsView: View {
                     Text("7 days").tag(604800)
                 }
                 .accessibilityLabel("Default disappearing message timer for new chats")
+            } header: {
+                Text("Defaults for new chats")
             } footer: {
                 Text("Existing conversations keep their own settings — these apply to new ones.")
             }

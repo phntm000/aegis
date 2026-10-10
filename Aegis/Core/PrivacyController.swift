@@ -15,7 +15,7 @@ final class PrivacyController: ObservableObject {
 
     @Published private(set) var isShielded = false
 
-    private var monitorTask: Task<Void, Never>?
+    private var screenshotObserver: NSObjectProtocol?
 
     func attach(appState: AppState) {
         self.appState = appState
@@ -33,15 +33,24 @@ final class PrivacyController: ObservableObject {
     }
 
     private func startScreenshotMonitoring() {
-        monitorTask?.cancel()
-        monitorTask = Task { @MainActor [weak self] in
-            let sequence = NotificationCenter.default.notifications(
-                named: UIApplication.userDidTakeScreenshotNotification
-            )
-            for await _ in sequence {
-                guard let self else { return }
-                await self.handleScreenshotTaken()
+        stopScreenshotMonitoring()
+        // Closure observer (not the async sequence): `Notification` is not
+        // Sendable, which Swift 6 rejects in `for await`.
+        screenshotObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.userDidTakeScreenshotNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.handleScreenshotTaken()
             }
+        }
+    }
+
+    private func stopScreenshotMonitoring() {
+        if let observer = screenshotObserver {
+            NotificationCenter.default.removeObserver(observer)
+            screenshotObserver = nil
         }
     }
 

@@ -138,7 +138,7 @@ struct GroupDetailView: View {
                 }
             }
 
-            Section("Encryption") {
+            Section {
                 HStack {
                     Label("Sender-key session", systemImage: "lock.fill")
                         .foregroundStyle(AegisColors.textPrimary)
@@ -154,6 +154,8 @@ struct GroupDetailView: View {
                 }
                 .disabled(viewModel.isWorking)
                 .accessibilityHint("Starts a fresh sender-key session for this group")
+            } header: {
+                Text("Encryption")
             } footer: {
                 Text("Group messages use sender keys so large groups stay fast. Rotate if you suspect a member's device was compromised.")
             }

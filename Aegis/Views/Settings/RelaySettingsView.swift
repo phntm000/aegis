@@ -64,7 +64,7 @@ struct RelaySettingsView: View {
             }
 
             if mode == .customRelay {
-                Section("Your relay") {
+                Section {
                     TextField("https://relay.example.com", text: $customURL)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
@@ -101,6 +101,8 @@ struct RelaySettingsView: View {
                         }
                         .accessibilityLabel("Relay test: \(result.detail)")
                     }
+                } header: {
+                    Text("Your relay")
                 } footer: {
                     Text("Host the open-source relay on any server you control. It never sees plaintext — only encrypted envelopes addressed by opaque ids.")
                 }
