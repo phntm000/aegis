@@ -110,8 +110,8 @@ final class MessagingRichnessTests: XCTestCase {
 
     // MARK: - Edit window
 
-    private func sentMessage(sentAt: Date, isFromMe: Bool = true) -> Message {
-        Message(
+    private func sentMessage(sentAt: Date, isFromMe: Bool = true) -> Aegis.Message {
+        Aegis.Message(
             conversationID: UUID(),
             senderID: UUID(),
             isFromMe: isFromMe,
