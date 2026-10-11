@@ -104,6 +104,11 @@ struct ChatListView: View {
         Group {
             if viewModel.isLoading {
                 LoadingOverlayView(label: "Loading conversations…")
+            } else if let loadError = viewModel.error, viewModel.conversations.isEmpty {
+                // A load failure is not an empty inbox — surface it with retry.
+                ErrorStateView(message: loadError) {
+                    Task { @MainActor in await viewModel.load() }
+                }
             } else if viewModel.isEmpty && viewModel.searchText.isEmpty {
                 EmptyStateView(
                     icon: "bubble.left.and.bubble.right",
