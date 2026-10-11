@@ -28,19 +28,37 @@ struct SettingsView: View {
                                         .font(AegisType.caption)
                                         .foregroundStyle(AegisColors.textTertiary)
                                 }
+                            } else if let loadError = viewModel.error {
+                                // Identity load failed: show the failure instead of a
+                                // spinner that never resolves. Tapping opens Identity
+                                // settings, which offers a retry.
+                                HStack(spacing: AegisLayout.m) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(AegisColors.warning)
+                                        .accessibilityHidden(true)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Couldn't load identity")
+                                            .font(AegisType.bodyStrong)
+                                            .foregroundStyle(AegisColors.textPrimary)
+                                        Text(loadError)
+                                            .font(AegisType.caption)
+                                            .foregroundStyle(AegisColors.textSecondary)
+                                            .lineLimit(2)
+                                    }
+                                }
                             } else {
                                 ProgressView().tint(AegisColors.accent)
                             }
                         }
                         .padding(.vertical, AegisLayout.xs)
                     }
-                    .accessibilityLabel("Identity settings")
+                    .accessibilityLabel(identityRowLabel)
                 }
 
                 Section {
                     settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent, destination: AnyView(PrivacySettingsView()))
                     settingsRow(icon: "person.slash.fill", title: "Blocked", color: AegisColors.danger, destination: AnyView(BlockedContactsView().environmentObject(appState)))
-                    settingsRow(icon: "paintbrush.fill", title: "Appearance", color: Color.purple, destination: AnyView(AppearanceSettingsView()))
+                    settingsRow(icon: "paintbrush.fill", title: "Appearance", color: AegisColors.purple, destination: AnyView(AppearanceSettingsView()))
                     settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger, destination: AnyView(NotificationsSettingsView(appState: appState)))
                     settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success, destination: AnyView(AppLockSettingsView()))
                 } header: {
@@ -76,6 +94,13 @@ struct SettingsView: View {
                 await viewModel.load()
             }
         }
+    }
+
+    private var identityRowLabel: String {
+        if viewModel.identity == nil, viewModel.error != nil {
+            return "Identity settings, identity failed to load"
+        }
+        return "Identity settings"
     }
 
     private func settingsRow(

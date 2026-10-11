@@ -1,4 +1,5 @@
 import AegisCrypto
+import AegisDeviceLink
 import AegisModeration
 import Combine
 import Foundation
@@ -75,6 +76,19 @@ final class AppState: ObservableObject {
     let store: any StoreService
     let voiceRoom: any VoiceRoomService
     let deviceLink: any DeviceLinkService
+
+    /// Paired-channel blob sync (attachments / voice notes). The actor is
+    /// created lazily so the @Sendable progress callback can reference self.
+    private lazy var blobRelay = DeviceLinkBlobRelay(
+        deviceLink: deviceLink,
+        transport: transport,
+        crypto: crypto,
+        onOutboundProgress: { [weak self] progress in
+            Task { @MainActor [weak self] in
+                self?.noteLinkedSyncProgress(progress)
+            }
+        }
+    )
 
     let appLock: AppLockManager
     let privacy: PrivacyController
@@ -1119,12 +1133,42 @@ final class AppState: ObservableObject {
     /// SAS words to display (primary: after the new device scans; secondary:
     /// immediately after scanning).
     @Published var pairingSASWords: [String]?
+    /// Primary-side outbound blob syncs (this device → linked devices),
+    /// for the Linked devices settings screen.
+    @Published private(set) var linkedSyncProgress: [DeviceSyncProgress] = []
+
+    /// Records one outbound blob-sync progress event (primary side).
+    /// Completed/failed rows linger briefly so the user sees the outcome,
+    /// then are removed.
+    private func noteLinkedSyncProgress(_ progress: DeviceSyncProgress) {
+        if let idx = linkedSyncProgress.firstIndex(where: { $0.id == progress.id }) {
+            linkedSyncProgress[idx] = progress
+        } else {
+            linkedSyncProgress.append(progress)
+        }
+        switch progress.state {
+        case .streaming:
+            break
+        case .done, .failed:
+            let id = progress.id
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self?.linkedSyncProgress.removeAll { $0.id == id }
+            }
+        }
+    }
 
     func startDeviceLinkListeners() {
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.isLinkedDevice = await self.deviceLink.isLinkedDevice()
             self.linkedDevices = await self.deviceLink.linkedDevices()
+            if self.isLinkedDevice {
+                // Rebuild in-flight blob reassembly after the paired
+                // channel rebinds (app launch). No auto-download: waiters
+                // resume, everything else waits for the next tap.
+                await self.blobRelay.resumeIncomplete()
+            }
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1197,6 +1241,10 @@ final class AppState: ObservableObject {
 
     func unpairDevice(_ device: DeviceInfo) async {
         await deviceLink.unpair(deviceID: device.deviceID)
+        // Drop in-flight blob sync state (staged bytes, manifests). Channel
+        // keys are wiped by DeviceLinkManager; already-synced files stay —
+        // unpairing cannot remote-wipe (stated in the UI).
+        await blobRelay.dropAll()
         await refreshLinkedDevices()
     }
 
@@ -1312,9 +1360,34 @@ final class AppState: ObservableObject {
             }
         case .unpair:
             await deviceLink.unpair(deviceID: fromDevice)
+            await blobRelay.dropAll()
             await refreshLinkedDevices()
         case .heartbeat:
             await refreshLinkedDevices()
+        case .attachmentManifest:
+            // Primary → linked only: a blob is available for download.
+            guard isLinkedDevice else { return }
+            if let manifest = try? JSONDecoder().decode(LinkedBlobManifest.self, from: message.body) {
+                await blobRelay.noteManifest(manifest)
+            }
+        case .attachmentChunk:
+            // Primary → linked only: one indexed ciphertext chunk.
+            guard isLinkedDevice else { return }
+            if let chunk = try? JSONDecoder().decode(LinkedBlobChunk.self, from: message.body) {
+                await blobRelay.ingest(chunk)
+            }
+        case .attachmentRequest:
+            // Linked → primary only: serve (or re-offer) this blob.
+            guard !isLinkedDevice else { return }
+            if let req = try? JSONDecoder().decode(LinkedBlobRequest.self, from: message.body) {
+                await handleLinkedBlobRequest(req, fromDevice: fromDevice)
+            }
+        case .attachmentFailure:
+            // Primary → linked only: the blob can't be served.
+            guard isLinkedDevice else { return }
+            if let failure = try? JSONDecoder().decode(LinkedBlobFailure.self, from: message.body) {
+                await blobRelay.noteFailure(failure)
+            }
         }
     }
 
@@ -1391,6 +1464,13 @@ final class AppState: ObservableObject {
         )
         guard let body = try? JSONEncoder().encode(linked) else { return }
         try? await deviceLink.sendSync(kind: .incomingMessage, body: body)
+        // Attachments / voice notes: the linked device has no conversation
+        // keys, so it can never fetch from the relay itself — offer the
+        // blobs over the paired channel. Detached: staging ciphertext must
+        // not delay the message forward.
+        Task {
+            await blobRelay.offerBlobs(for: message)
+        }
     }
 
     /// Linked device: sends a text message via the primary.
@@ -1402,6 +1482,63 @@ final class AppState: ObservableObject {
             messageID: UUID()
         )
         try await deviceLink.sendSync(kind: .sendMessage, body: JSONEncoder().encode(req))
+    }
+
+    // MARK: - Linked-device blob sync
+
+    /// Primary: a linked device wants a blob. Serves it, rebuilds the
+    /// offer when the device missed the manifest (offline past the paired
+    /// mailbox TTL), or fails honestly when the message/blob is gone.
+    private func handleLinkedBlobRequest(_ req: LinkedBlobRequest, fromDevice: UUID) async {
+        switch await blobRelay.serve(req, to: fromDevice) {
+        case .served, .failed:
+            break
+        case .unknownTransfer:
+            let messages = (try? await store.fetchMessages(
+                conversationID: req.conversationID, limit: 200, before: nil)) ?? []
+            if let message = messages.first(where: { $0.id == req.messageID }) {
+                await blobRelay.offerBlobs(for: message, to: fromDevice)
+                _ = await blobRelay.serve(req, to: fromDevice)
+            } else {
+                let failure = LinkedBlobFailure(
+                    transferID: req.transferID,
+                    attachmentID: req.attachmentID,
+                    reason: "This file is no longer available."
+                )
+                if let body = try? JSONEncoder().encode(failure) {
+                    try? await deviceLink.sendSync(to: fromDevice, kind: .attachmentFailure, body: body)
+                }
+            }
+        }
+    }
+
+    /// Linked device: the blob manifest for a known attachment, when its
+    /// offer arrived over the paired channel (nil when the offer was
+    /// missed — the download path asks the primary to re-offer).
+    func linkedBlobManifest(for attachmentID: UUID) async -> LinkedBlobManifest? {
+        await blobRelay.manifest(for: attachmentID)
+    }
+
+    /// Linked device: downloads a blob over the paired channel. The stream
+    /// yields progress, then `.done` (decrypted file URL) or `.failed`
+    /// (human-readable; the UI offers a retry, which resumes from the
+    /// first missing chunk). The primary must be reachable — an
+    /// unreachable primary surfaces as `.failed`, never a silent stall.
+    func downloadLinkedBlob(manifest: LinkedBlobManifest) async -> AsyncStream<LinkedDownloadEvent> {
+        await blobRelay.download(manifest)
+    }
+
+    /// Linked device: download when the manifest offer was missed (this
+    /// device was offline, or the primary couldn't stage the blob at
+    /// forward time). The primary re-offers from the stored message; the
+    /// stream starts when the manifest arrives, or fails honestly.
+    func downloadLinkedBlobBlind(
+        attachmentID: UUID,
+        messageID: UUID,
+        conversationID: UUID
+    ) async -> AsyncStream<LinkedDownloadEvent> {
+        await blobRelay.downloadBlind(
+            attachmentID: attachmentID, messageID: messageID, conversationID: conversationID)
     }
 
     /// Recipient identity keys for a conversation (DM peer or group members).
@@ -1441,7 +1578,24 @@ private extension Message {
             senderName: senderName,
             status: status.rawValue,
             sentAt: sentAt,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            attachment: attachment.map {
+                LinkedAttachmentMeta(
+                    id: $0.id,
+                    filename: $0.filename,
+                    mimeType: $0.mimeType,
+                    byteCount: $0.byteCount,
+                    thumbnailData: $0.thumbnailData
+                )
+            },
+            voiceNote: voiceNote.map {
+                LinkedVoiceNoteMeta(
+                    id: $0.id,
+                    duration: $0.duration,
+                    levels: $0.levels,
+                    transcript: $0.transcript
+                )
+            }
         )
     }
 }
@@ -1457,8 +1611,26 @@ private extension LinkedMessage {
             replyToID: replyToID,
             status: MessageStatus(rawValue: status) ?? .delivered,
             expiresAt: expiresAt,
-            attachment: nil,
-            voiceNote: nil,
+            // The linked device never gets wrappedKey/remoteLocator: it has
+            // no conversation keys and no relay access. Blobs arrive via
+            // the paired blob-transfer protocol instead.
+            attachment: attachment.map {
+                Attachment(
+                    id: $0.id,
+                    filename: $0.filename,
+                    mimeType: $0.mimeType,
+                    byteCount: $0.byteCount,
+                    thumbnailData: $0.thumbnailData
+                )
+            },
+            voiceNote: voiceNote.map {
+                VoiceNote(
+                    id: $0.id,
+                    duration: $0.duration,
+                    levels: $0.levels,
+                    transcript: $0.transcript
+                )
+            },
             sentAt: sentAt
         )
     }

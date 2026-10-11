@@ -128,6 +128,7 @@ struct MockDeviceLink: DeviceLinkService {
         throw PreviewServiceError.noIdentity
     }
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {}
+    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {}
     func unpair(deviceID: UUID) async {}
 }
 
@@ -238,6 +239,11 @@ actor MockCrypto: CryptoService {
         try? FileManager.default.removeItem(at: destinationURL)
         try FileManager.default.copyItem(at: ciphertextURL, to: destinationURL)
     }
+
+    // Previews have no conversation keys: linked-device blob sync is
+    // unavailable in previews (the UI shows the honest "primary device"
+    // limitation instead).
+    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? { nil }
 
     // MARK: Backup
 
