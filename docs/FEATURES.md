@@ -388,8 +388,6 @@ applied before encoding, on-device.
 **What.** Persistent voice rooms inside a group or channel: drop in/out
 without ringing anyone, see who's speaking, stage vs. open-floor modes,
 per-user mute, mute/deafen, and a text sidecar bound to the room.
-<<<<<<< HEAD
-=======
 **Status (Oct 2026):** shipped, **including video**: every mesh peer
 connection negotiates a video m-line; the local video track stays
 disabled until the user enables the camera. Speaking indicators are
@@ -398,7 +396,6 @@ entirely local. Stage mode ships with deterministic host election (the
 room creator while present; hand-raise queue for speakers). Per-user
 control is **mute only** — see limitation below. The room-bound text
 sidecar is spec-only (not yet built).
->>>>>>> origin/parity/docs-protocol
 **Limitation.** Continuous per-user volume is not offered: the stock
 WebRTC iOS SDK (verified against the pinned M154 headers) exposes no
 per-track audio tap or gain API, so a volume slider would be a fake
