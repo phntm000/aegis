@@ -677,7 +677,7 @@ extension WebRTCMediaEngine {
                 local = max(local, level)
             }
         }
-        let (callback, snapshot): (([UUID: CallAudioLevels]) -> Void)?, [UUID: CallAudioLevels] =
+        let (callback, snapshot): ((([UUID: CallAudioLevels]) -> Void)?, [UUID: CallAudioLevels]) =
             lock.withLock {
                 lastLevels[callID] = CallAudioLevels(local: local, remote: remote)
                 return (_onAudioLevels, lastLevels)

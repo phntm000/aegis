@@ -502,7 +502,8 @@ actor VoiceRoomManager {
         for p in room?.participants ?? [] where !p.isLocal {
             await ensureOffer(to: p.fingerprintHex)
         }
-        log.info("Voice room membership epoch \(mediaEpoch): mesh re-keyed")
+        let epochNow = mediaEpoch
+        log.info("Voice room membership epoch \(epochNow): mesh re-keyed")
     }
 
     /// Adopts a peer's epoch bump when it's newer than ours (we missed the
@@ -521,7 +522,7 @@ actor VoiceRoomManager {
         for p in room?.participants ?? [] where !p.isLocal {
             await ensureOffer(to: p.fingerprintHex)
         }
-        log.info("Adopted voice room epoch \(mediaEpoch)")
+        log.info("Adopted voice room epoch \(epoch)")
     }
 
     /// After a mesh re-key every peer connection renegotiates; reset the

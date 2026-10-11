@@ -226,7 +226,7 @@ struct WirePayload: Codable, Sendable {
         parts.append(body ?? "-")
         parts.append(editedBody ?? "-")
         parts.append(emoji ?? "-")
-        parts.append((ballotChoices ?? []).map(String.init).joined(separator: ","))
+        parts.append((ballotChoices ?? []).map { String($0) }.joined(separator: ","))
         parts.append(pollQuestion ?? "-")
         parts.append((pollOptions ?? []).joined(separator: "\u{1F}"))
         parts.append(pollAllowsMultipleChoice.map(String.init) ?? "-")
