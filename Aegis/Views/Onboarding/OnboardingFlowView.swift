@@ -2,6 +2,10 @@ import SwiftUI
 
 /// First-launch pager: welcome → identity → backup → first contact.
 /// A slim progress header keeps the flow honest about its length.
+/// The step title is rendered in-content (not via the navigation bar's
+/// large-title mode): large titles are laid out around scrollable content,
+/// and on this static VStack the expanded title area was never reserved —
+/// the title was drawn over the welcome hero instead of above it.
 struct OnboardingFlowView: View {
     @StateObject private var viewModel: OnboardingViewModel
     @EnvironmentObject private var appState: AppState
@@ -16,6 +20,8 @@ struct OnboardingFlowView: View {
                 progressHeader
                     .padding(.horizontal, AegisLayout.l)
                     .padding(.top, AegisLayout.s)
+
+                stepTitle
 
                 Group {
                     switch viewModel.step {
@@ -36,8 +42,7 @@ struct OnboardingFlowView: View {
                     .padding(.bottom, AegisLayout.l)
             }
             .background(AegisColors.background.ignoresSafeArea())
-            .navigationTitle(viewModel.step.title)
-            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .navigationBar)
             .alert("Couldn't load identity", isPresented: bootstrapErrorPresented) {
                 Button("Start fresh", role: .destructive) {
                     appState.bootstrapError = nil
@@ -67,6 +72,20 @@ struct OnboardingFlowView: View {
             }
         }
         .accessibilityLabel("Step \(viewModel.step.rawValue + 1) of \(OnboardingViewModel.Step.allCases.count)")
+    }
+
+    /// In-content step title. Uses the largeTitle token (Dynamic Type
+    /// scaling, wraps naturally at accessibility sizes) and the adaptive
+    /// textPrimary color (dark mode safe). Leading-aligned in a linear
+    /// VStack, so no element can ever overlap it regardless of text size.
+    private var stepTitle: some View {
+        Text(viewModel.step.title)
+            .font(AegisType.largeTitle)
+            .foregroundStyle(AegisColors.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AegisLayout.l)
+            .padding(.top, AegisLayout.m)
+            .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder
