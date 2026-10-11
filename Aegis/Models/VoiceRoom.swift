@@ -275,6 +275,20 @@ struct SpeakingDetector {
     private var belowCount: [String: Int] = [:]
     private var speaking: Set<String> = []
 
+    /// The private counter state suppresses the memberwise initializer, so
+    /// tests and previews configure thresholds through this explicit one.
+    init(
+        startThreshold: Float = 0.08,
+        startPolls: Int = 2,
+        stopThreshold: Float = 0.05,
+        stopPolls: Int = 4
+    ) {
+        self.startThreshold = startThreshold
+        self.startPolls = startPolls
+        self.stopThreshold = stopThreshold
+        self.stopPolls = stopPolls
+    }
+
     /// Feeds one poll of `(participantID, level)` pairs. Returns the
     /// `(id, isSpeaking)` transitions since the last poll.
     mutating func update(levels: [(id: String, level: Float)]) -> [(String, Bool)] {
