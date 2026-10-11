@@ -115,6 +115,18 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
         GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
+        # The broadcast extension must install on the simulator (CI runs
+        # xcodebuild test unsigned). Without these, the built .appex lacks
+        # the extension dictionary and simctl install fails with
+        # "extensionDictionary must be set in placeholder attributes":
+        # - XPC! package type marks the bundle as an app extension;
+        # - GENERATE_INFOPLIST_FILE=NO keeps our literal Info.plist (with
+        #   the NSExtension dict) instead of an auto-generated one that
+        #   drops it;
+        # - SKIP_INSTALL=YES is standard for extension targets.
+        PRODUCT_BUNDLE_PACKAGE_TYPE: XPC!
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
 
   # Unit tests for app-layer logic (crypto engine, adapters). Runs on the
   # iOS simulator in CI via `xcodebuild test`.
