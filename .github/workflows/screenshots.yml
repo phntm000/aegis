@@ -1,0 +1,78 @@
+# Aegis simulator screenshots
+#
+# Manual-only workflow: builds the app for the iOS Simulator, boots a
+# simulator, installs and launches the genuinely running app, and captures
+# real screenshots (not mockups). Artifacts are uploaded as `aegis-screenshots`.
+
+name: Simulator screenshots
+
+on:
+  workflow_dispatch:
+
+env:
+  XCODE_APP: /Applications/Xcode_16.2.app
+  SIM_DEVICE: iPhone 16
+  BUNDLE_ID: app.aegis.ios
+
+jobs:
+  screenshots:
+    name: Capture simulator screenshots
+    runs-on: macos-14
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app for simulator (unsigned)
+        run: >
+          xcodebuild build
+          -project Aegis.xcodeproj
+          -scheme Aegis
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+          -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Boot simulator
+        run: |
+          set -u
+          xcrun simctl boot "$SIM_DEVICE" 2>/dev/null || echo "simulator already booted or boot in progress"
+          xcrun simctl bootstatus "$SIM_DEVICE" -b
+          xcrun simctl list devices | grep "$SIM_DEVICE"
+
+      - name: Install and launch app
+        run: |
+          set -u
+          APP_PATH=$(ls -d build/Build/Products/Debug-iphonesimulator/Aegis.app)
+          echo "Installing $APP_PATH"
+          xcrun simctl install booted "$APP_PATH"
+          echo "Launching $BUNDLE_ID"
+          xcrun simctl launch booted "$BUNDLE_ID"
+
+      - name: Capture screenshots
+        run: |
+          set -u
+          echo "Waiting for app to settle..."
+          sleep 12
+          xcrun simctl io booted screenshot shot-01-launch.png
+          echo "Captured shot-01-launch.png"
+          sleep 12
+          xcrun simctl io booted screenshot shot-02-settled.png
+          echo "Captured shot-02-settled.png"
+          ls -la shot-*.png
+          file shot-*.png
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-screenshots
+          path: shot-*.png
+          if-no-files-found: error
