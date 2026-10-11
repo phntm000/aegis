@@ -193,15 +193,15 @@ enum SampleData {
         let threadReply1 = Message(
             conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
             body: "I'll pick you up from arrivals.",
-            threadRootID: threadParent.id,
             status: .read,
+            threadRootID: threadParent.id,
             sentAt: now.addingTimeInterval(-2300)
         )
         let threadReply2 = Message(
             conversationID: dmMaya.id, senderID: identity.id, isFromMe: true,
             body: "Terminal B, see you there!",
-            threadRootID: threadParent.id,
             status: .read,
+            threadRootID: threadParent.id,
             sentAt: now.addingTimeInterval(-2200)
         )
         let starredMessage = Message(
