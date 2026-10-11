@@ -67,6 +67,15 @@ actor DeviceLinkBlobRelay {
     /// the blob at forward time.
     private var parkedBlind: [UUID: AsyncStream<LinkedDownloadEvent>.Continuation] = [:]
     private var blindWatchdogs: [UUID: Task<Void, Never>] = [:]
+
+    /// Removes and returns a parked blind-download continuation, if any.
+    /// Actor-isolated `async` so the nonisolated watchdog `Task` can claim it
+    /// across the actor boundary: `Dictionary.removeValue` is a *mutating*
+    /// struct method, and Swift forbids forming the required inout access to
+    /// actor-isolated state from a nonisolated context, even with `await`.
+    private func takeParkedBlind(forKey id: UUID) async -> AsyncStream<LinkedDownloadEvent>.Continuation? {
+        parkedBlind.removeValue(forKey: id)
+    }
     /// Throttle UserDefaults writes while chunks stream in.
     private var persistCounters: [UUID: Int] = [:]
 
@@ -478,7 +487,7 @@ actor DeviceLinkBlobRelay {
             try? await Task.sleep(nanoseconds: 90_000_000_000)
             guard let self else { return }
             if Task.isCancelled { return }
-            if let parked = await self.parkedBlind.removeValue(forKey: attachmentID) {
+            if let parked = await self.takeParkedBlind(forKey: attachmentID) {
                 parked.yield(.failed(
                     "Couldn't reach your primary device. Make sure it's online, then try again."))
                 parked.finish()
@@ -595,7 +604,7 @@ actor DeviceLinkBlobRelay {
 
     private func finalize(transferID: UUID) async {
         guard let transfer = inbound[transferID] else { return }
-        let manifest = transfer.manifest
+        let manifest = await transfer.manifest
         do {
             let blob = try await transfer.verifiedData()
             let staged = AegisPaths.ensureStaging()
@@ -698,8 +707,9 @@ actor DeviceLinkBlobRelay {
     }
 
     private func persistReceived(for transfer: InboundBlobTransfer) async {
+        let manifest = await transfer.manifest
         var dict = (UserDefaults.standard.dictionary(forKey: PersistKeys.inboundReceived) as? [String: [Int]]) ?? [:]
-        dict[transfer.manifest.attachmentID.uuidString] = await transfer.receivedIndexes
+        dict[manifest.attachmentID.uuidString] = await transfer.receivedIndexes
         UserDefaults.standard.set(dict, forKey: PersistKeys.inboundReceived)
     }
 
