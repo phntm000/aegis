@@ -233,7 +233,7 @@ struct WirePayload: Codable, Sendable {
         parts.append(pollAnonymous.map(String.init) ?? "-")
         parts.append(pollClosesAt.map { String($0.timeIntervalSince1970) } ?? "-")
         parts.append(pinExpiresAt.map { String($0.timeIntervalSince1970) } ?? "-")
-        parts.append(expiresIn.map(String.init) ?? "-")
+        parts.append(expiresIn.map { String($0) } ?? "-")
         return Data(parts.joined(separator: "\u{1E}").utf8)
     }
 

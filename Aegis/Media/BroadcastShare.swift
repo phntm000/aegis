@@ -79,7 +79,7 @@ final class BroadcastFrameReader: @unchecked Sendable {
                         .takeUnretainedValue()
                         .readLatest()
                 },
-                CFNotificationName(BroadcastShare.notificationName as CFString),
+                BroadcastShare.notificationName as CFString,
                 nil,
                 .deliverImmediately
             )

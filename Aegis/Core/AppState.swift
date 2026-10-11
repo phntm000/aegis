@@ -582,8 +582,10 @@ final class AppState: ObservableObject {
         // Message-requests inbox: a DM from an identity we have never
         // contacted is not a chat yet. (resolveContact below creates the
         // placeholder, so the "unknown" check must run first.)
-        let wasUnknownSender = conversation.kind == .direct
-            && (await contactForFingerprint(envelope.senderKey)) == nil
+        // Note: the contact lookup is hoisted because `await` is not
+        // allowed in the RHS autoclosure of `&&`.
+        let knownContact = await contactForFingerprint(envelope.senderKey)
+        let wasUnknownSender = conversation.kind == .direct && knownContact == nil
         let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         let afterRead = payload.disappearAfterRead ?? false
         let expiresAt = payload.expiresIn.flatMap { afterRead ? nil : Date().addingTimeInterval($0) }
