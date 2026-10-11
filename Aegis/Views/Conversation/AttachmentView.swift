@@ -143,9 +143,6 @@ struct AttachmentContentView: View {
 }
 
 /// Voice note bubble: play/pause, waveform with progress, duration.
-/// On a linked device the audio streams over the paired channel on first
-/// play: progress, failure, and tap-to-retry are shown inline. A transcript
-/// (when the primary produced one) renders under the waveform.
 struct VoiceNoteBubbleView: View {
     let voiceNote: VoiceNote
     @ObservedObject var viewModel: ConversationViewModel
@@ -154,83 +151,44 @@ struct VoiceNoteBubbleView: View {
     @State private var audioURL: URL?
     @State private var isResolving = false
 
-    private var transferState: TransferState {
-        viewModel.transfers[voiceNote.id] ?? .idle
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: AegisLayout.xs) {
-            HStack(spacing: AegisLayout.s) {
-                Button {
-                    Task { @MainActor in await toggle() }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.black.opacity(0.12))
-                            .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
-                        playControl
+        HStack(spacing: AegisLayout.s) {
+            Button {
+                Task { @MainActor in await toggle() }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.black.opacity(0.12))
+                        .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
+                    if isResolving {
+                        ProgressView().tint(AegisColors.accent)
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(AegisType.callout)
+                            .foregroundStyle(AegisColors.accent)
                     }
                 }
-                .accessibilityLabel(playAccessibilityLabel)
+            }
+            .accessibilityLabel(player.isPlaying ? "Pause voice note" : "Play voice note")
 
-                // Waveform with played-progress tint.
-                HStack(spacing: 2) {
-                    ForEach(Array(voiceNote.levels.enumerated()), id: \.offset) { index, level in
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(barColor(for: index))
-                            .frame(width: 3, height: max(4, CGFloat(level) * 30))
-                            .accessibilityHidden(true)
-                    }
+            // Waveform with played-progress tint.
+            HStack(spacing: 2) {
+                ForEach(Array(voiceNote.levels.enumerated()), id: \.offset) { index, level in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(barColor(for: index))
+                        .frame(width: 3, height: max(4, CGFloat(level) * 30))
+                        .accessibilityHidden(true)
                 }
-
-                Text(Formatters.duration(voiceNote.duration))
-                    .font(AegisType.caption)
-                    .foregroundStyle(AegisColors.textSecondary)
-                    .monospacedDigit()
             }
 
-            if let transcript = voiceNote.transcript, !transcript.isEmpty {
-                Text(transcript)
-                    .font(AegisType.caption)
-                    .foregroundStyle(AegisColors.textSecondary)
-                    .accessibilityLabel("Voice note transcript: \(transcript)")
-            }
+            Text(Formatters.duration(voiceNote.duration))
+                .font(AegisType.caption)
+                .foregroundStyle(AegisColors.textSecondary)
+                .monospacedDigit()
         }
         .padding(.vertical, AegisLayout.xs)
         .onDisappear { player.stop() }
         .accessibilityLabel("Voice note, \(Formatters.duration(voiceNote.duration))")
-    }
-
-    @ViewBuilder
-    private var playControl: some View {
-        switch transferState {
-        case .preparing:
-            ProgressView().tint(AegisColors.accent)
-        case .inProgress(let p):
-            ProgressView(value: p)
-                .tint(AegisColors.accent)
-                .frame(width: 28, height: 28)
-        case .failed:
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(AegisType.callout)
-                .foregroundStyle(AegisColors.danger)
-        case .idle, .done:
-            if isResolving {
-                ProgressView().tint(AegisColors.accent)
-            } else {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(AegisType.callout)
-                    .foregroundStyle(AegisColors.accent)
-            }
-        }
-    }
-
-    private var playAccessibilityLabel: String {
-        switch transferState {
-        case .failed: return "Retry voice note download"
-        case .inProgress(let p): return "Downloading voice note, \(Int(p * 100)) percent"
-        default: return player.isPlaying ? "Pause voice note" : "Play voice note"
-        }
     }
 
     private func barColor(for index: Int) -> Color {

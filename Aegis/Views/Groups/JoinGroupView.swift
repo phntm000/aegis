@@ -66,7 +66,7 @@ struct JoinGroupView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AegisColors.accent)
-                .disabled(isWorking || requestSent || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isWorking || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .padding(.horizontal, AegisLayout.l)
                 .accessibilityLabel("Send join request")
 

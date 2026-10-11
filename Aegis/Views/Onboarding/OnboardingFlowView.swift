@@ -38,7 +38,7 @@ struct OnboardingFlowView: View {
             .background(AegisColors.background.ignoresSafeArea())
             .navigationTitle(viewModel.step.title)
             .navigationBarTitleDisplayMode(.large)
-            .alert("Couldn't load identity", isPresented: bootstrapErrorPresented) {
+            .alert("Couldn't load identity", isPresented: .constant(appState.bootstrapError != nil)) {
                 Button("Start fresh", role: .destructive) {
                     appState.bootstrapError = nil
                 }
@@ -46,15 +46,6 @@ struct OnboardingFlowView: View {
                 Text(appState.bootstrapError ?? "")
             }
         }
-    }
-
-    /// Explicit binding (not `.constant`): the alert must be able to dismiss
-    /// itself and stay in sync with the published error.
-    private var bootstrapErrorPresented: Binding<Bool> {
-        Binding(
-            get: { appState.bootstrapError != nil },
-            set: { if !$0 { appState.bootstrapError = nil } }
-        )
     }
 
     private var progressHeader: some View {
@@ -79,12 +70,10 @@ struct OnboardingFlowView: View {
                 Button("Back", action: viewModel.back)
                     .buttonStyle(.bordered)
                     .tint(AegisColors.accent)
-                    .frame(minHeight: AegisLayout.minTapTarget)
                 Spacer()
                 Button("Continue") { viewModel.next() }
                     .buttonStyle(.borderedProminent)
                     .tint(AegisColors.accent)
-                    .frame(minHeight: AegisLayout.minTapTarget)
                     .disabled(viewModel.createdIdentity == nil)
             }
         case .backup:
@@ -92,18 +81,15 @@ struct OnboardingFlowView: View {
                 Button("Back", action: viewModel.back)
                     .buttonStyle(.bordered)
                     .tint(AegisColors.accent)
-                    .frame(minHeight: AegisLayout.minTapTarget)
                 Spacer()
                 if viewModel.backupComplete {
                     Button("Continue") { viewModel.next() }
                         .buttonStyle(.borderedProminent)
                         .tint(AegisColors.accent)
-                        .frame(minHeight: AegisLayout.minTapTarget)
                 } else {
                     Button("I'll do this later") { viewModel.next() }
                         .buttonStyle(.bordered)
                         .tint(AegisColors.accent)
-                        .frame(minHeight: AegisLayout.minTapTarget)
                 }
             }
         case .addContact:

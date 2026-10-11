@@ -56,9 +56,6 @@ struct VoiceNote: Identifiable, Sendable, Codable, Hashable {
     let wrappedKey: Data?
     let remoteLocator: String?
     let localRelativePath: String?
-    /// On-device transcript, when one was produced. Synced to linked
-    /// devices alongside the audio blob; nil when unavailable.
-    let transcript: String?
 
     init(
         id: UUID = UUID(),
@@ -66,8 +63,7 @@ struct VoiceNote: Identifiable, Sendable, Codable, Hashable {
         levels: [Float],
         wrappedKey: Data? = nil,
         remoteLocator: String? = nil,
-        localRelativePath: String? = nil,
-        transcript: String? = nil
+        localRelativePath: String? = nil
     ) {
         self.id = id
         self.duration = duration
@@ -75,6 +71,5 @@ struct VoiceNote: Identifiable, Sendable, Codable, Hashable {
         self.wrappedKey = wrappedKey
         self.remoteLocator = remoteLocator
         self.localRelativePath = localRelativePath
-        self.transcript = transcript
     }
 }

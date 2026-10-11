@@ -69,6 +69,12 @@ struct ActiveCall: Sendable, Hashable {
     var isSpeakerOn: Bool
     var isVideoEnabled: Bool
     var isScreenSharing: Bool
+    /// Full-device sharing via the ReplayKit Broadcast Upload Extension.
+    var isBroadcastSharing: Bool = false
+    /// In-app screen-share capture is paused (peer sees a frozen frame).
+    var isScreenSharePaused: Bool = false
+    /// On-device redaction rectangles for screen sharing (unit coords).
+    var screenShareRedactions: [CGRect] = []
     var connectedAt: Date?
     /// The 4-character SAS, once both DTLS fingerprints are known.
     /// Nil while unavailable — the UI shows no ceremony then.

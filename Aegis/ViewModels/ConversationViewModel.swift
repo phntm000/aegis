@@ -159,11 +159,9 @@ final class ConversationViewModel: ObservableObject {
         conversation.canSend && appState.connectionState.canSend
     }
 
-    /// Attachments and voice notes SEND from the primary device only in v1
-    /// (the paired channel carries media downloads to linked devices, but
-    /// linked → primary media upload is not implemented); the composer
-    /// hides those affordances on linked devices instead of failing
-    /// silently. See DeviceLinkBlobRelay for the honest limits.
+    /// Attachments and voice notes send from the primary device only in
+    /// v1 (the linked-device relay carries text); the composer hides those
+    /// affordances on linked devices instead of failing silently.
     var canSendAttachments: Bool {
         !appState.isLinkedDevice
     }
@@ -498,11 +496,6 @@ final class ConversationViewModel: ObservableObject {
         if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
         }
-        // Linked secondary: no relay access and no conversation keys — the
-        // blob arrives over the paired channel from the primary device.
-        if appState.isLinkedDevice {
-            return await downloadLinkedAttachment(attachment)
-        }
         guard let locator = attachment.remoteLocator, let wrappedKey = attachment.wrappedKey else {
             return nil
         }
@@ -529,54 +522,11 @@ final class ConversationViewModel: ObservableObject {
         }
     }
 
-    /// Linked-device attachment download over the paired channel. Progress,
-    /// completion, and failure drive `transfers[id]` so the bubble shows
-    /// the matching state; tapping a failed row retries (resuming from the
-    /// first missing chunk — never restarting from zero).
-    private func downloadLinkedAttachment(_ attachment: Attachment) async -> URL? {
-        transfers[attachment.id] = .inProgress(0)
-        let stream: AsyncStream<LinkedDownloadEvent>
-        if let manifest = await appState.linkedBlobManifest(for: attachment.id) {
-            stream = await appState.downloadLinkedBlob(manifest: manifest)
-        } else {
-            // The manifest offer was missed (this device was offline, or
-            // the primary couldn't stage the blob at forward time). The
-            // blind request asks the primary to re-offer from the stored
-            // message, then downloads.
-            let messageID = messages.first(where: { $0.attachment?.id == attachment.id })?.id
-                ?? attachment.id
-            stream = await appState.downloadLinkedBlobBlind(
-                attachmentID: attachment.id,
-                messageID: messageID,
-                conversationID: conversation.id
-            )
-        }
-        for await event in stream {
-            switch event {
-            case .progress(let p):
-                transfers[attachment.id] = .inProgress(p)
-            case .done(let url):
-                transfers[attachment.id] = .done
-                return url
-            case .failed(let message):
-                transfers[attachment.id] = .failed(message)
-                sendError = message
-                return nil
-            }
-        }
-        return nil
-    }
-
     /// Local playable URL for a voice note (downloads + decrypts if needed).
     func localAudioURL(for voiceNote: VoiceNote) async -> URL? {
         let localURL = AegisPaths.attachmentsDirectory.appendingPathComponent("\(voiceNote.id).m4a")
         if FileManager.default.fileExists(atPath: localURL.path) {
             return localURL
-        }
-        // Linked secondary: the audio blob (and transcript, if any) arrive
-        // over the paired channel from the primary device.
-        if appState.isLinkedDevice {
-            return await downloadLinkedVoiceNote(voiceNote)
         }
         guard let locator = voiceNote.remoteLocator, let wrappedKey = voiceNote.wrappedKey else {
             return nil
@@ -600,39 +550,6 @@ final class ConversationViewModel: ObservableObject {
             transfers[voiceNote.id] = .failed(error.localizedDescription)
             return nil
         }
-    }
-
-    /// Linked-device voice-note download over the paired channel. The
-    /// transcript (when the primary has one) arrives in the manifest and
-    /// is already on the model — only the audio blob streams here.
-    private func downloadLinkedVoiceNote(_ voiceNote: VoiceNote) async -> URL? {
-        transfers[voiceNote.id] = .inProgress(0)
-        let stream: AsyncStream<LinkedDownloadEvent>
-        if let manifest = await appState.linkedBlobManifest(for: voiceNote.id) {
-            stream = await appState.downloadLinkedBlob(manifest: manifest)
-        } else {
-            let messageID = messages.first(where: { $0.voiceNote?.id == voiceNote.id })?.id
-                ?? voiceNote.id
-            stream = await appState.downloadLinkedBlobBlind(
-                attachmentID: voiceNote.id,
-                messageID: messageID,
-                conversationID: conversation.id
-            )
-        }
-        for await event in stream {
-            switch event {
-            case .progress(let p):
-                transfers[voiceNote.id] = .inProgress(p)
-            case .done(let url):
-                transfers[voiceNote.id] = .done
-                return url
-            case .failed(let message):
-                transfers[voiceNote.id] = .failed(message)
-                sendError = message
-                return nil
-            }
-        }
-        return nil
     }
 
     private func makeThumbnail(for url: URL, mimeType: String) -> Data? {

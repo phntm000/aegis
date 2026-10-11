@@ -1,7 +1,7 @@
 // swift-tools-version: 5.9
 //  Aegis — root SwiftPM manifest.
 //
-//  Aggregates the local library packages. Each package is developed
+//  Aggregates the three local library packages. Each package is developed
 //  independently (see Packages/<name>/Package.swift); this manifest exposes
 //  them as one `Aegis` umbrella library for consumers that want a single
 //  import.
@@ -30,9 +30,6 @@ let package = Package(
         .package(name: "AegisTransport", path: "Packages/AegisTransport"),
         // Encrypted persistence: models, repository protocols, SQLCipher design.
         .package(name: "AegisStore", path: "Packages/AegisStore"),
-        // Paired device-link channel: chunked attachment / voice-note
-        // transfer protocol (manifests, chunks, resume) for linked devices.
-        .package(name: "AegisDeviceLink", path: "Packages/AegisDeviceLink"),
     ],
     targets: [
         .target(
@@ -41,7 +38,6 @@ let package = Package(
                 .product(name: "AegisCrypto", package: "AegisCrypto"),
                 .product(name: "AegisTransport", package: "AegisTransport"),
                 .product(name: "AegisStore", package: "AegisStore"),
-                .product(name: "AegisDeviceLink", package: "AegisDeviceLink"),
             ],
             path: "Sources/Aegis"
         ),

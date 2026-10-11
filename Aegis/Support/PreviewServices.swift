@@ -1,5 +1,6 @@
 import AegisTransport
 import Foundation
+import WebRTCBridge
 
 // MARK: - Preview services
 //
@@ -84,6 +85,8 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
         cont.yield(.updated(nil))
     }
 
+    func retryJoin() async {}
+
     func setMuted(_ muted: Bool) async {
         lock.withLock {
             room?.localMuted = muted
@@ -103,6 +106,55 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
         }
         cont.yield(.updated(lock.withLock { room }))
     }
+
+    func setCameraEnabled(_ enabled: Bool) async {
+        lock.withLock {
+            room?.localCameraOn = enabled
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].isCameraOn = enabled
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex }) {
+                room?.participants[i].volume = max(0, min(1, volume))
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setRoomMode(_ mode: VoiceRoomMode) async {
+        lock.withLock { room?.mode = mode }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func raiseHand(_ raised: Bool) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].hasHandRaised = raised
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setSpeakerApproval(fingerprintHex: String, approved: Bool) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex }) {
+                room?.participants[i].isSpeaker = approved
+                room?.participants[i].hasHandRaised = false
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func videoCallID(for fingerprintHex: String) async -> UUID? { nil }
+
+    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {}
+
+    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {}
 }
 
 // MARK: - Mock device link (inert)
@@ -127,7 +179,6 @@ struct MockDeviceLink: DeviceLinkService {
         throw PreviewServiceError.noIdentity
     }
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {}
-    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {}
     func unpair(deviceID: UUID) async {}
 }
 
@@ -239,11 +290,6 @@ actor MockCrypto: CryptoService {
         try FileManager.default.copyItem(at: ciphertextURL, to: destinationURL)
     }
 
-    // Previews have no conversation keys: linked-device blob sync is
-    // unavailable in previews (the UI shows the honest "primary device"
-    // limitation instead).
-    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? { nil }
-
     // MARK: Backup
 
     func exportEncryptedBackup(passphrase: String) async throws -> Data {
@@ -293,6 +339,7 @@ actor MockTransport: TransportService {
     private let incomingCallContinuation: AsyncStream<IncomingCall>.Continuation
     private let callStateContinuation: AsyncStream<CallStateEvent>.Continuation
     private let groupContinuation: AsyncStream<GroupEvent>.Continuation
+    nonisolated let broadcastShareSupported = false
 
     private var relayConfig = RelayConfig.default
     private var sentEnvelopes: [OutgoingEnvelope] = []
@@ -422,6 +469,10 @@ actor MockTransport: TransportService {
     func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws {}
     func startScreenShare(callID: UUID) async throws {}
     func stopScreenShare(callID: UUID) async throws {}
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws {}
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws {}
+    func startBroadcastShare(callID: UUID) async throws {}
+    func stopBroadcastShare(callID: UUID) async throws {}
     nonisolated func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {}
 
     // MARK: Groups

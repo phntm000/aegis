@@ -199,7 +199,6 @@ struct BlockedListView: View {
                             }
                             .font(AegisType.callout)
                             .foregroundStyle(AegisColors.accent)
-                            .aegisMinimumTapTarget()
                             .accessibilityLabel("Unblock \(contact.displayName)")
                         }
                         .padding(.vertical, AegisLayout.xs)

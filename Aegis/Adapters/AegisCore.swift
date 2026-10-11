@@ -25,6 +25,7 @@ import AegisTransport
 import CryptoKit
 import Foundation
 import Security
+import WebRTCBridge
 
 /// Errors from the transport integration hub.
 enum AegisCoreError: Error, LocalizedError {
@@ -180,6 +181,76 @@ protocol CallMediaControl: AnyObject, Sendable {
     /// Enables/disables remote audio rendering on one peer connection
     /// (voice-room "deafen"). Does not affect the local microphone.
     func setRemoteAudioEnabled(_ enabled: Bool, for callID: UUID)
+
+    // MARK: Voice-room mesh extras
+
+    /// Marks a peer connection as a voice-room mesh peer (vs a 1:1 call).
+    /// Room peers route remote audio through the software mixer (per-user
+    /// volume) instead of WebRTC's default rendering, and take part in
+    /// audio-level polling for speaking indicators.
+    func noteVoiceRoomPeer(_ callID: UUID)
+    /// Per-user output gain for a voice-room peer, 0.0–1.0 (default 1.0).
+    /// Applied locally by the room audio mixer; never signaled.
+    func setRemoteVolume(_ volume: Float, for callID: UUID)
+    /// Drops the cached peer-connection factory so subsequently created
+    /// peer connections use a fresh DTLS certificate. The caller tears down
+    /// existing connections and renegotiates (see VoiceRoomManager's
+    /// membership-epoch rotation); new handshakes then derive fresh
+    /// SRTP keys — forward secrecy for membership changes.
+    func rotateMediaIdentity()
+    /// Starts/stops audio-level polling; levels arrive on `onAudioLevels`.
+    func setAudioLevelPolling(_ enabled: Bool)
+    /// Local camera preview for the room UI (e.g. an RTCMTLVideoView).
+    func attachLocalVideoRenderer(_ renderer: RTCVideoRenderer)
+    func detachLocalVideoRenderer(_ renderer: RTCVideoRenderer)
+
+    // MARK: Screen-share extras (1:1 calls)
+
+    /// Pauses frame capture (the peer sees a frozen frame); the video track
+    /// stays live so resume needs no renegotiation.
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws
+    /// Opaque redaction rectangles painted over captured frames on-device,
+    /// before encoding. Normalized unit coordinates (0–1) in window space.
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws
+    /// Full-device screen sharing via the ReplayKit Broadcast Upload
+    /// Extension: arms the broadcast-frame reader; the extension's frames
+    /// take over the call's video track once they start arriving.
+    func startBroadcastShare(callID: UUID) async throws
+    func stopBroadcastShare(callID: UUID) async throws
+    /// True when the Broadcast Upload Extension is bundled with the app.
+    var broadcastShareSupported: Bool { get }
+
+    // MARK: Engine callbacks (voice rooms; unused by the 1:1 path)
+
+    /// Audio levels per peer-connection UUID, polled while
+    /// `setAudioLevelPolling(true)` is active. Computed locally from
+    /// decoded audio; nothing leaves the device.
+    ///
+    /// Not @Sendable (like the existing `onLocalIceCandidate`): the
+    /// manager captures its actor weakly and hops back via Task.
+    var onAudioLevels: (([UUID: CallAudioLevels]) -> Void)? { get set }
+    /// WebRTC connectivity changes per peer connection.
+    var onPeerConnectionStateChanged: ((UUID, PeerConnectionState) -> Void)? { get set }
+    /// The OS denied camera access while starting capture.
+    var onCameraPermissionDenied: (() -> Void)? { get set }
+}
+
+/// Local audio levels for one peer connection, polled from WebRTC stats.
+/// Both values are 0.0–1.0 linear energy; computed on-device, never sent.
+struct CallAudioLevels: Sendable {
+    /// This device's microphone energy on the outbound stream.
+    var local: Float
+    /// The peer's decoded-audio energy on the inbound stream.
+    var remote: Float
+}
+
+/// WebRTC connectivity mapped to UI-friendly states.
+enum PeerConnectionState: Sendable {
+    case connecting
+    case connected
+    case reconnecting
+    case failed
+    case closed
 }
 
 /// Thrown when a media control is invoked with no media engine attached.
@@ -1831,6 +1902,22 @@ actor AegisCore {
 
     func stopScreenShare(callID: UUID) async throws {
         try await mediaControl().stopScreenShare(callID: callID)
+    }
+
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws {
+        try await mediaControl().setScreenSharePaused(paused, callID: callID)
+    }
+
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws {
+        try await mediaControl().setScreenShareRedactionRegions(regions, callID: callID)
+    }
+
+    func startBroadcastShare(callID: UUID) async throws {
+        try await mediaControl().startBroadcastShare(callID: callID)
+    }
+
+    func stopBroadcastShare(callID: UUID) async throws {
+        try await mediaControl().stopBroadcastShare(callID: callID)
     }
 
     /// Tears down the media session for a finished call. Called from every

@@ -16,6 +16,7 @@ import AegisTransport
 import CryptoKit
 import Foundation
 import os.log
+import WebRTCBridge
 
 // MARK: - Live crypto
 
@@ -215,14 +216,6 @@ struct LiveCryptoService: CryptoService {
         }
         let fileKeyData = try await engine.unwrapFileKey(wrappedKey, groupID: context?.groupID, peer: peer)
         try AttachmentCrypto.decryptFile(at: ciphertextURL, key: SymmetricKey(data: fileKeyData), to: destinationURL)
-    }
-
-    /// Raw file key for provisioning linked devices over the paired
-    /// channel. Reads the Keychain cache populated at send/receipt time
-    /// (see noteFileKey) — the wrapped key itself may no longer unwrap
-    /// after sender-key rotations, but the cached raw key stays valid.
-    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? {
-        await core.fileKey(forWrappedKey: wrappedKey)
     }
 
     // MARK: Backup
@@ -437,6 +430,32 @@ struct LiveTransportService: TransportService {
     }
 
     nonisolated var screenShareSupported: Bool { true }
+
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws {
+        try await core.setScreenSharePaused(paused, callID: callID)
+    }
+
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws {
+        try await core.setScreenShareRedactionRegions(regions, callID: callID)
+    }
+
+    func startBroadcastShare(callID: UUID) async throws {
+        try await core.startBroadcastShare(callID: callID)
+    }
+
+    func stopBroadcastShare(callID: UUID) async throws {
+        try await core.stopBroadcastShare(callID: callID)
+    }
+
+    nonisolated var broadcastShareSupported: Bool {
+        // The Broadcast Upload Extension ships inside the app bundle's
+        // PlugIns directory; absent on simulator or extension-less builds,
+        // in which case the UI offers in-app sharing only.
+        guard let plugins = Bundle.main.builtInPlugInsURL else { return false }
+        return (try? FileManager.default.contentsOfDirectory(
+            at: plugins, includingPropertiesForKeys: nil
+        ))?.contains(where: { $0.pathExtension == "appex" }) ?? false
+    }
 
     func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {
         Task { [core] in core.mediaRouter.setVideoSink(sink, for: callID) }
@@ -1011,12 +1030,48 @@ struct LiveVoiceRoomService: VoiceRoomService {
         await core.voiceRooms.leaveRoom()
     }
 
+    func retryJoin() async {
+        await core.voiceRooms.retryJoin()
+    }
+
     func setMuted(_ muted: Bool) async {
         await core.voiceRooms.setLocalMuted(muted)
     }
 
     func setDeafened(_ deafened: Bool) async {
         await core.voiceRooms.setLocalDeafened(deafened)
+    }
+
+    func setCameraEnabled(_ enabled: Bool) async {
+        await core.voiceRooms.setLocalCameraEnabled(enabled)
+    }
+
+    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
+        await core.voiceRooms.setParticipantVolume(fingerprintHex: fingerprintHex, volume: volume)
+    }
+
+    func setRoomMode(_ mode: VoiceRoomMode) async {
+        await core.voiceRooms.setRoomMode(mode)
+    }
+
+    func raiseHand(_ raised: Bool) async {
+        await core.voiceRooms.raiseHand(raised)
+    }
+
+    func setSpeakerApproval(fingerprintHex: String, approved: Bool) async {
+        await core.voiceRooms.setSpeakerApproval(fingerprintHex: fingerprintHex, approved: approved)
+    }
+
+    func videoCallID(for fingerprintHex: String) async -> UUID? {
+        await core.voiceRooms.videoCallID(for: fingerprintHex)
+    }
+
+    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {
+        await core.voiceRooms.attachLocalPreview(renderer)
+    }
+
+    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {
+        await core.voiceRooms.detachLocalPreview(renderer)
     }
 }
 
@@ -1068,10 +1123,6 @@ struct LiveDeviceLinkService: DeviceLinkService {
 
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {
         try await core.deviceLink.sendSync(kind: kind, body: body)
-    }
-
-    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {
-        try await core.deviceLink.sendSync(to: deviceID, kind: kind, body: body)
     }
 
     func unpair(deviceID: UUID) async {

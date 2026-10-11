@@ -243,6 +243,18 @@ protocol TransportService: Sendable {
     /// False on platforms/transports without a capture pipeline; the UI then
     /// explains instead of showing a dead button.
     var screenShareSupported: Bool { get }
+    /// Pauses frame capture (the peer sees a frozen frame); resume needs
+    /// no renegotiation.
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws
+    /// Opaque redaction rectangles painted over captured frames on-device,
+    /// before encoding. Normalized unit coordinates (0–1) in window space.
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws
+    /// Full-device sharing via the ReplayKit Broadcast Upload Extension.
+    /// Throws when the extension isn't bundled.
+    func startBroadcastShare(callID: UUID) async throws
+    func stopBroadcastShare(callID: UUID) async throws
+    /// True when the Broadcast Upload Extension is bundled with the app.
+    var broadcastShareSupported: Bool { get }
     /// Register the view that renders decoded remote video frames for a
     /// call (see AegisTransport.CallMediaRouter / VideoSink). Pass nil to
     /// unregister. Dropped silently when the call has no media pipeline.
