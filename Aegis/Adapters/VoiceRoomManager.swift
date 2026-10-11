@@ -232,13 +232,13 @@ actor VoiceRoomManager {
     private func wireEngineCallbacks() {
         Task { [weak self] in
             guard let control = await self?.mediaControl() else { return }
-            control.onAudioLevels = { [weak self] levels in
+            control.onAudioLevels = { @Sendable [weak self] levels in
                 Task { await self?.handleAudioLevels(levels) }
             }
-            control.onPeerConnectionStateChanged = { [weak self] callID, state in
+            control.onPeerConnectionStateChanged = { @Sendable [weak self] callID, state in
                 Task { await self?.handlePeerConnectionState(callID, state) }
             }
-            control.onCameraPermissionDenied = { [weak self] in
+            control.onCameraPermissionDenied = { @Sendable [weak self] in
                 Task { await self?.handleCameraPermissionDenied() }
             }
         }
@@ -325,16 +325,12 @@ actor VoiceRoomManager {
         emit()
     }
 
-    func attachLocalPreview(_ renderer: RTCVideoRenderer) {
-        Task { [weak self] in
-            await self?.mediaControl()?.attachLocalVideoRenderer(renderer)
-        }
+    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {
+        await mediaControl()?.attachLocalVideoRenderer(renderer)
     }
 
-    func detachLocalPreview(_ renderer: RTCVideoRenderer) {
-        Task { [weak self] in
-            await self?.mediaControl()?.detachLocalVideoRenderer(renderer)
-        }
+    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {
+        await mediaControl()?.detachLocalVideoRenderer(renderer)
     }
 
     // MARK: - Per-user mute

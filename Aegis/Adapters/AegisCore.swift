@@ -2156,7 +2156,7 @@ actor AegisCore {
                 epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
                 kind: "inviteRevoked",
                 auditEvent: audit,
-                inviteGeneration: generation,
+                inviteGeneration: generation
             )
         )
     }
