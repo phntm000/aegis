@@ -1293,7 +1293,7 @@ actor AegisCore {
 
     private func ttlForKind(_ kind: EnvelopeKind) -> UInt32 {
         switch kind {
-        case .message, .reaction, .edit, .delete: return 0 // relay default (7d)
+        case .message, .reaction, .edit, .delete, .poll, .ballot, .pin: return 0 // relay default (7d)
         case .typing: return 60
         case .readReceipt, .screenshotNotice: return 300
         case .callSignal: return 300

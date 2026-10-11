@@ -480,6 +480,10 @@ actor MockStore: StoreService {
         return Array(list.prefix(limit))
     }
 
+    func fetchMessage(id: UUID, conversationID: UUID) async throws -> Message? {
+        messages[conversationID]?.first { $0.id == id }
+    }
+
     func saveMessage(_ message: Message) async throws {
         var list = messages[message.conversationID] ?? []
         list.insert(message, at: 0)
@@ -523,6 +527,34 @@ actor MockStore: StoreService {
 
     func pendingOutbox() async throws -> [Message] {
         messages.values.flatMap { $0 }.filter { $0.status == .sending && $0.isFromMe }
+    }
+
+    func fetchThreadReplies(conversationID: UUID, threadRootID: UUID) async throws -> [Message] {
+        (messages[conversationID] ?? [])
+            .filter { $0.threadRootID == threadRootID }
+            .sorted { $0.sentAt < $1.sentAt }
+    }
+
+    func fetchThreadSummaries(conversationID: UUID) async throws -> [UUID: ThreadSummary] {
+        var out: [UUID: ThreadSummary] = [:]
+        for message in messages[conversationID] ?? [] {
+            guard let root = message.threadRootID else { continue }
+            if var existing = out[root] {
+                existing.replyCount += 1
+                existing.lastActivityAt = max(existing.lastActivityAt, message.sentAt)
+                out[root] = existing
+            } else {
+                out[root] = ThreadSummary(replyCount: 1, lastActivityAt: message.sentAt)
+            }
+        }
+        return out
+    }
+
+    func fetchStarredMessages(conversationID: UUID?) async throws -> [Message] {
+        messages.values.flatMap { $0 }
+            .filter { $0.isStarred && !$0.isDeleted }
+            .filter { conversationID == nil || $0.conversationID == conversationID }
+            .sorted { $0.sentAt > $1.sentAt }
     }
 
     func fetchContacts() async throws -> [Contact] {

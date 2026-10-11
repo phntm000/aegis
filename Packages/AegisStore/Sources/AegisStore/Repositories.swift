@@ -100,6 +100,10 @@ public protocol MessageRepository: Sendable {
     /// (content, attachments, chunks, keys). Returns the count wiped.
     /// Called on unlock, on timer, and after sync.
     func expungeDisappeared(now: Date) async throws -> Int
+    /// Messages about to be wiped by `expungeDisappeared`. Lets the caller
+    /// destroy out-of-band secrets (Keychain wrapped keys, cached files)
+    /// before the rows — and their attachment metadata — are gone.
+    func disappearedMessages(now: Date) async throws -> [Message]
     /// Outbox: outgoing messages with `deliveryState` in (`.queued`,
     /// `.failed`) — failed sends are retried on reconnect, keeping their
     /// original IDs so recipients dedupe — plus messages whose
@@ -111,6 +115,22 @@ public protocol MessageRepository: Sendable {
     /// Adds/removes the local user's reaction. Reactions from other users
     /// arrive as events and are applied via `update`.
     func setReaction(id: MessageID, emoji: String?, userID: UserID) async throws
+    /// All replies in a thread, oldest-first. Empty when the thread has no
+    /// replies (the parent itself is fetched separately via `fetch`).
+    func listReplies(
+        in conversationID: ConversationID,
+        threadRootID: MessageID
+    ) async throws -> [Message]
+    /// Per-thread stats for a conversation: thread root ID -> summary.
+    /// One query (GROUP BY), so the thread list doesn't page the store.
+    func threadSummaries(
+        in conversationID: ConversationID
+    ) async throws -> [MessageID: ThreadSummary]
+    /// Locally starred messages, newest-first. `conversationID` nil = all
+    /// conversations.
+    func starredMessages(
+        in conversationID: ConversationID?
+    ) async throws -> [Message]
 }
 
 // MARK: - Contacts

@@ -11,6 +11,10 @@ struct ConversationView: View {
     @State private var showingTimerSheet = false
     @State private var showingCallChoice = false
     @State private var showingSafetyNumber = false
+    @State private var showingStarred = false
+    @State private var showingPollComposer = false
+    @State private var openThreadParent: Message?
+    @State private var jumpTarget: UUID?
 
     init(conversation: Conversation, contact: Contact?, appState: AppState) {
         _viewModel = StateObject(wrappedValue: ConversationViewModel(
@@ -43,10 +47,18 @@ struct ConversationView: View {
                 .padding(.top, AegisLayout.s)
             }
 
+            if !viewModel.activePins.isEmpty {
+                PinnedMessageBar(viewModel: viewModel, onJump: jumpToMessage)
+            }
+
             threadContent
 
             if viewModel.conversation.canSend {
-                ComposerView(viewModel: viewModel)
+                ComposerView(
+                    viewModel: viewModel,
+                    onCreatePoll: { showingPollComposer = true },
+                    onShowStarred: { showingStarred = true }
+                )
             } else {
                 announcementNotice
             }
@@ -91,7 +103,13 @@ struct ConversationView: View {
             Text("Calls are end-to-end encrypted.")
         }
         .sheet(isPresented: $showingInfo) {
-            ConversationInfoView(viewModel: viewModel)
+            ConversationInfoView(viewModel: viewModel, onJumpToMessage: { id in
+                showingInfo = false
+                // Let the info sheet dismiss before scrolling.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    jumpToMessage(id)
+                }
+            })
         }
         .sheet(isPresented: $showingSafetyNumber) {
             if let contact = viewModel.displayContact {
@@ -105,6 +123,15 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showingTimerSheet) {
             DisappearingTimerSheet(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingPollComposer) {
+            PollComposerView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingStarred) {
+            StarredMessagesView(viewModel: viewModel, onJump: jumpToMessage)
+        }
+        .sheet(item: $openThreadParent) { parent in
+            ThreadView(parent: parent, viewModel: viewModel)
         }
         .onAppear {
             viewModel.onAppear()
@@ -197,8 +224,13 @@ struct ConversationView: View {
                         if shouldShowDayHeader(message, after: previous) {
                             dayHeader(for: message.sentAt)
                         }
-                        MessageBubbleView(message: message, viewModel: viewModel)
-                            .id(message.id)
+                        MessageBubbleView(
+                            message: message,
+                            viewModel: viewModel,
+                            onJumpToMessage: jumpToMessage,
+                            onOpenThread: openThread
+                        )
+                        .id(message.id)
                     }
 
                     if !viewModel.typingNames.isEmpty {
@@ -225,6 +257,39 @@ struct ConversationView: View {
             .onChange(of: viewModel.typingNames) { _, _ in
                 scrollToBottom(proxy: proxy, animated: true)
             }
+            .onChange(of: jumpTarget) { _, target in
+                if let target {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo(target, anchor: .center)
+                    }
+                    // Clear after the jump so a later tap on the same
+                    // message re-triggers the scroll.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        if jumpTarget == target { jumpTarget = nil }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Jumps to a message (quotes, pins, stars), paging history back
+    /// first when the message isn't loaded yet.
+    private func jumpToMessage(_ id: UUID) {
+        Task { @MainActor in
+            guard await viewModel.ensureMessageLoaded(id) else { return }
+            jumpTarget = id
+            Haptics.selection()
+        }
+    }
+
+    /// Opens the thread anchored at `rootID`, paging history back first
+    /// when the parent isn't loaded yet.
+    private func openThread(_ rootID: UUID) {
+        Task { @MainActor in
+            guard await viewModel.ensureMessageLoaded(rootID),
+                  let parent = viewModel.message(withId: rootID)
+            else { return }
+            openThreadParent = parent
         }
     }
 

@@ -19,6 +19,9 @@ struct Conversation: Identifiable, Sendable, Codable, Hashable {
     // Privacy behavior
     /// Disappearing-message interval in seconds; nil = off.
     var disappearingInterval: TimeInterval?
+    /// When true, the disappearing timer starts when the recipient reads
+    /// the message instead of when it is sent.
+    var disappearingAfterRead: Bool
     var readReceiptsEnabled: Bool
     var typingIndicatorsEnabled: Bool
 
@@ -44,6 +47,7 @@ struct Conversation: Identifiable, Sendable, Codable, Hashable {
         isArchived: Bool = false,
         unreadCount: Int = 0,
         disappearingInterval: TimeInterval? = nil,
+        disappearingAfterRead: Bool = false,
         readReceiptsEnabled: Bool = true,
         typingIndicatorsEnabled: Bool = true,
         isAnnouncementOnly: Bool = false,
@@ -63,6 +67,7 @@ struct Conversation: Identifiable, Sendable, Codable, Hashable {
         self.isArchived = isArchived
         self.unreadCount = unreadCount
         self.disappearingInterval = disappearingInterval
+        self.disappearingAfterRead = disappearingAfterRead
         self.readReceiptsEnabled = readReceiptsEnabled
         self.typingIndicatorsEnabled = typingIndicatorsEnabled
         self.isAnnouncementOnly = isAnnouncementOnly
@@ -94,6 +99,9 @@ extension Conversation {
 
     var disappearingLabel: String? {
         guard let interval = disappearingInterval else { return nil }
+        if disappearingAfterRead {
+            return "Disappears \(Formatters.duration(interval)) after read"
+        }
         return "Disappears after \(Formatters.duration(interval))"
     }
 }

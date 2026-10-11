@@ -99,6 +99,10 @@ struct LiveCryptoService: CryptoService {
         await engine.supersededIdentityFingerprint
     }
 
+    func signWithIdentity(_ data: Data) async throws -> Data {
+        try await engine.signWithIdentity(data)
+    }
+
     // MARK: Session encryption
 
     func encryptMessage(
@@ -766,15 +770,95 @@ struct LiveStoreService: StoreService {
         try await saveMessage(message)
     }
 
+    func fetchMessage(id: UUID, conversationID: UUID) async throws -> Message? {
+        guard let pkg = try await pkgStore.messages.fetch(id: packageID(id)),
+              appUUID(pkg.conversationID) == conversationID
+        else { return nil }
+        return try await mapMessage(pkg)
+    }
+
     func deleteMessage(id: UUID, conversationID: UUID) async throws {
-        // Tombstone rather than hard delete (position preserved).
+        // Tombstone rather than hard delete (position preserved), with
+        // cryptographic wipe of the attachment secrets first.
         if let pkg = try await pkgStore.messages.fetch(id: packageID(id)) {
+            await wipeMessageSecrets(pkg)
             try await pkgStore.messages.applyTombstone(id: pkg.id, at: Date())
         }
     }
 
+    /// Cryptographic wipe for disappearing messages: destroys the
+    /// Keychain wrapped file keys and any cached plaintext/ciphertext
+    /// files BEFORE the rows are expunged (SQLCipher `secure_delete=ON`
+    /// zeroes the deleted rows themselves).
     func purgeExpiredMessages() async throws -> Int {
-        try await pkgStore.messages.expungeDisappeared(now: Date())
+        let now = Date()
+        let doomed = (try? await pkgStore.messages.disappearedMessages(now: now)) ?? []
+        for message in doomed {
+            await wipeMessageSecrets(message)
+        }
+        return try await pkgStore.messages.expungeDisappeared(now: now)
+    }
+
+    /// Destroys out-of-band secrets for a message: Keychain wrapped keys
+    /// and cached files for its attachments.
+    private func wipeMessageSecrets(_ message: AegisStore.Message) async {
+        for attachmentID in message.attachmentIDs {
+            let appID = appUUID(attachmentID)
+            try? KeychainHelper.delete(
+                service: "app.aegis.wrappedkeys",
+                account: StoreMapping.attachmentKeychainID(appID)
+            )
+            // Cached downloads are named "<attachmentUUID>…" — remove any
+            // file with that prefix. Best-effort: a missing file is fine.
+            let prefix = appID.uuidString
+            if let files = try? FileManager.default.contentsOfDirectory(
+                at: AegisPaths.attachmentsDirectory,
+                includingPropertiesForKeys: nil
+            ) {
+                for file in files where file.lastPathComponent.hasPrefix(prefix) {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+        }
+    }
+
+    func fetchThreadReplies(conversationID: UUID, threadRootID: UUID) async throws -> [Message] {
+        let pkgs = try await pkgStore.messages.listReplies(
+            in: packageID(conversationID),
+            threadRootID: packageID(threadRootID)
+        )
+        return try await withThrowingTaskGroup(of: Message.self) { group in
+            for pkg in pkgs { group.addTask { try await self.mapMessage(pkg) } }
+            var out: [Message] = []
+            for try await message in group { out.append(message) }
+            // listReplies is oldest-first; the task group loses order.
+            return out.sorted { $0.sentAt < $1.sentAt }
+        }
+    }
+
+    func fetchThreadSummaries(conversationID: UUID) async throws -> [UUID: ThreadSummary] {
+        let pkgs = try await pkgStore.messages.threadSummaries(in: packageID(conversationID))
+        var out: [UUID: ThreadSummary] = [:]
+        for (id, summary) in pkgs {
+            out[appUUID(id)] = ThreadSummary(
+                replyCount: summary.replyCount,
+                lastActivityAt: summary.lastActivityAt
+            )
+        }
+        return out
+    }
+
+    func fetchStarredMessages(conversationID: UUID?) async throws -> [Message] {
+        let pkgs = try await pkgStore.messages.starredMessages(
+            in: conversationID.map { packageID($0) }
+        )
+        return try await withThrowingTaskGroup(of: Message.self) { group in
+            for pkg in pkgs { group.addTask { try await self.mapMessage(pkg) } }
+            var out: [Message] = []
+            for try await message in group { out.append(message) }
+            // starredMessages is newest-first; the task group loses order.
+            return out.sorted { $0.sentAt > $1.sentAt }
+        }
     }
 
     func searchMessages(query: String, limit: Int) async throws -> [Message] {

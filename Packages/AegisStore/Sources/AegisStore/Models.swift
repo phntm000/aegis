@@ -209,6 +209,8 @@ public struct Conversation: Codable, Sendable, Identifiable, Equatable {
     public var keyEpoch: Int
     /// Disappearing-message timer in seconds; nil = off.
     public var disappearingTimerSeconds: Int?
+    /// When true, the disappearing timer starts on read, not on send.
+    public var disappearingAfterRead: Bool = false
     public var isArchived: Bool
     public var isMuted: Bool
     public var isPinned: Bool
@@ -231,6 +233,7 @@ public struct Conversation: Codable, Sendable, Identifiable, Equatable {
         title: String? = nil,
         keyEpoch: Int = 0,
         disappearingTimerSeconds: Int? = nil,
+        disappearingAfterRead: Bool = false,
         isArchived: Bool = false,
         isMuted: Bool = false,
         isPinned: Bool = false,
@@ -251,6 +254,7 @@ public struct Conversation: Codable, Sendable, Identifiable, Equatable {
         self.title = title
         self.keyEpoch = keyEpoch
         self.disappearingTimerSeconds = disappearingTimerSeconds
+        self.disappearingAfterRead = disappearingAfterRead
         self.isArchived = isArchived
         self.isMuted = isMuted
         self.isPinned = isPinned
@@ -281,10 +285,14 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
     public var kind: MessageKind
     public var text: String?
     public var replyToMessageID: MessageID?
+    /// Frozen quote of the replied-to message, captured at reply time.
+    public var quoteSnapshot: QuoteSnapshot?
     public var threadRootID: MessageID?
     /// Edit bookkeeping. `editVersion` 0 = original.
     public var editVersion: Int
     public var editedAt: Date?
+    /// Previous bodies, oldest-first.
+    public var editHistory: [MessageEditRecord] = []
     /// Tombstone: content wiped, position preserved.
     public var isTombstone: Bool
     public var tombstonedAt: Date?
@@ -300,6 +308,10 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
     public var secrecyEpoch: Int
     public var reactions: [Reaction]
     public var poll: Poll?
+    /// Local-only star. Never synced, never leaves the device.
+    public var isStarred: Bool = false
+    /// Shared pin record (signed pin events propagate it).
+    public var pin: MessagePin?
     /// Attachment IDs in display order (populated for kind == .attachment).
     public var attachmentIDs: [AttachmentID]
     public var createdAt: Date
@@ -314,9 +326,11 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
         kind: MessageKind = .text,
         text: String? = nil,
         replyToMessageID: MessageID? = nil,
+        quoteSnapshot: QuoteSnapshot? = nil,
         threadRootID: MessageID? = nil,
         editVersion: Int = 0,
         editedAt: Date? = nil,
+        editHistory: [MessageEditRecord] = [],
         isTombstone: Bool = false,
         tombstonedAt: Date? = nil,
         disappearAt: Date? = nil,
@@ -328,6 +342,8 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
         secrecyEpoch: Int = 0,
         reactions: [Reaction] = [],
         poll: Poll? = nil,
+        isStarred: Bool = false,
+        pin: MessagePin? = nil,
         attachmentIDs: [AttachmentID] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -340,9 +356,11 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
         self.kind = kind
         self.text = text
         self.replyToMessageID = replyToMessageID
+        self.quoteSnapshot = quoteSnapshot
         self.threadRootID = threadRootID
         self.editVersion = editVersion
         self.editedAt = editedAt
+        self.editHistory = editHistory
         self.isTombstone = isTombstone
         self.tombstonedAt = tombstonedAt
         self.disappearAt = disappearAt
@@ -354,6 +372,8 @@ public struct Message: Codable, Sendable, Identifiable, Equatable {
         self.secrecyEpoch = secrecyEpoch
         self.reactions = reactions
         self.poll = poll
+        self.isStarred = isStarred
+        self.pin = pin
         self.attachmentIDs = attachmentIDs
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -373,6 +393,90 @@ public struct Reaction: Codable, Sendable, Equatable, Hashable {
     }
 }
 
+/// A frozen snapshot of the message being quoted, captured at reply time.
+/// The live pointer is `Message.replyToMessageID`; this snapshot survives
+/// the original being edited or deleted.
+public struct QuoteSnapshot: Codable, Sendable, Equatable, Hashable {
+    public var senderID: UserID?
+    public var senderName: String
+    public var bodyExcerpt: String?
+    public var hasAttachment: Bool
+    public var hasVoiceNote: Bool
+    public var isPoll: Bool
+    public var sentAt: Date?
+    /// The quoted message's own expiry (the quote inherits it).
+    public var expiresAt: Date? = nil
+
+    public init(
+        senderID: UserID? = nil,
+        senderName: String,
+        bodyExcerpt: String? = nil,
+        hasAttachment: Bool = false,
+        hasVoiceNote: Bool = false,
+        isPoll: Bool = false,
+        sentAt: Date? = nil,
+        expiresAt: Date? = nil
+    ) {
+        self.senderID = senderID
+        self.senderName = senderName
+        self.bodyExcerpt = bodyExcerpt
+        self.hasAttachment = hasAttachment
+        self.hasVoiceNote = hasVoiceNote
+        self.isPoll = isPoll
+        self.sentAt = sentAt
+        self.expiresAt = expiresAt
+    }
+}
+
+/// One entry of a message's version history: the body before an edit.
+public struct MessageEditRecord: Codable, Sendable, Equatable, Hashable {
+    public var body: String
+    public var editedAt: Date
+
+    public init(body: String, editedAt: Date = Date()) {
+        self.body = body
+        self.editedAt = editedAt
+    }
+}
+
+/// A shared pin record on a message. Propagated via signed pin events;
+/// admin-controlled in groups/channels.
+public struct MessagePin: Codable, Sendable, Equatable, Hashable {
+    public var pinnedBy: UserID
+    public var pinnedByName: String
+    public var pinnedAt: Date
+    /// Optional expiry; nil = pinned until unpinned.
+    public var expiresAt: Date?
+
+    public init(
+        pinnedBy: UserID,
+        pinnedByName: String,
+        pinnedAt: Date = Date(),
+        expiresAt: Date? = nil
+    ) {
+        self.pinnedBy = pinnedBy
+        self.pinnedByName = pinnedByName
+        self.pinnedAt = pinnedAt
+        self.expiresAt = expiresAt
+    }
+
+    public var isExpired: Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= Date()
+    }
+}
+
+/// Denormalized per-thread stats: reply count + last activity.
+public struct ThreadSummary: Codable, Sendable, Equatable, Hashable {
+    public var replyCount: Int
+    public var lastActivityAt: Date
+
+    public init(replyCount: Int, lastActivityAt: Date) {
+        self.replyCount = replyCount
+        self.lastActivityAt = lastActivityAt
+    }
+}
+
 /// A poll attached to a message. Ballots are separate sealed events;
 /// this struct holds the question, options, and locally-computed tally.
 public struct Poll: Codable, Sendable, Equatable {
@@ -386,6 +490,14 @@ public struct Poll: Codable, Sendable, Equatable {
     /// Voter set (user IDs) — visible even for anonymous polls so
     /// ballot-stuffing is detectable; voter->choice mapping stays hidden.
     public var voters: Set<UserID>
+    /// Voter -> chosen option indices. Populated only for non-anonymous
+    /// polls (enables vote changes; anonymous polls keep the voter set
+    /// only).
+    public var voterChoices: [UserID: [Int]] = [:]
+    /// This device's own current choices. Local-only.
+    public var myChoices: [Int] = []
+    /// Eligible voter count at creation (for quorum display); nil unknown.
+    public var eligibleVoterCount: Int? = nil
 
     public init(
         question: String,
@@ -394,7 +506,10 @@ public struct Poll: Codable, Sendable, Equatable {
         isAnonymous: Bool = false,
         closesAt: Date? = nil,
         tally: [Int: Int] = [:],
-        voters: Set<UserID> = []
+        voters: Set<UserID> = [],
+        voterChoices: [UserID: [Int]] = [:],
+        myChoices: [Int] = [],
+        eligibleVoterCount: Int? = nil
     ) {
         self.question = question
         self.options = options
@@ -403,6 +518,9 @@ public struct Poll: Codable, Sendable, Equatable {
         self.closesAt = closesAt
         self.tally = tally
         self.voters = voters
+        self.voterChoices = voterChoices
+        self.myChoices = myChoices
+        self.eligibleVoterCount = eligibleVoterCount
     }
 }
 

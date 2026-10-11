@@ -13,7 +13,7 @@
 
 enum StoreSchema {
     /// Current schema version. Must match SQLCipherStoreDescriptor.schemaVersion.
-    static let version = 3
+    static let version = 4
 
     static let v1 = """
         CREATE TABLE IF NOT EXISTS schema_migrations(
@@ -218,5 +218,22 @@ enum StoreSchema {
           group_id BLOB,
           peer BLOB
         );
+        """
+
+    /// v4 delta: messaging-richness columns. Quote snapshots and edit
+    /// history ride as JSON columns on `message` (same trade as reactions
+    /// and polls); `is_starred` is local-only; `pin_json` holds the shared
+    /// pin record; `disappearing_after_read` on `conversation` starts the
+    /// timer on read instead of send. Fresh databases get v1+v2+v3+v4.
+    static let v4 = """
+        ALTER TABLE message ADD COLUMN quote_snapshot_json TEXT;
+        ALTER TABLE message ADD COLUMN edit_history_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE message ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE message ADD COLUMN pin_json TEXT;
+        ALTER TABLE conversation ADD COLUMN disappearing_after_read INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX IF NOT EXISTS idx_message_thread
+          ON message(conversation_id, thread_root);
+        CREATE INDEX IF NOT EXISTS idx_message_starred
+          ON message(conversation_id, is_starred);
         """
 }

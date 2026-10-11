@@ -623,4 +623,173 @@ final class SQLCipherStoreTests: XCTestCase {
         XCTAssertNil(ctx?.groupID)
         XCTAssertEqual(ctx?.peer, Data([0x09]))
     }
+
+    // MARK: - Messaging richness (v4)
+
+    func testQuoteSnapshotAndEditHistoryRoundTrip() async throws {
+        let c = try await makeConversation()
+        var m = Message(
+            conversationID: c.id,
+            direction: .outgoing,
+            text: "edited body",
+            replyToMessageID: MessageID("parent"),
+            quoteSnapshot: QuoteSnapshot(
+                senderID: UserID("peer"),
+                senderName: "Maya",
+                bodyExcerpt: "original question",
+                sentAt: Date(timeIntervalSince1970: 1_700_000_000)
+            ),
+            editVersion: 2,
+            editedAt: Date(timeIntervalSince1970: 1_700_000_100),
+            editHistory: [
+                MessageEditRecord(body: "first draft", editedAt: Date(timeIntervalSince1970: 1_700_000_050)),
+                MessageEditRecord(body: "second draft", editedAt: Date(timeIntervalSince1970: 1_700_000_080)),
+            ]
+        )
+        try await store.messages.insert(m)
+        m = try await store.messages.fetch(id: m.id)!
+        XCTAssertEqual(m.quoteSnapshot?.senderName, "Maya")
+        XCTAssertEqual(m.quoteSnapshot?.bodyExcerpt, "original question")
+        XCTAssertEqual(m.editHistory.count, 2)
+        XCTAssertEqual(m.editHistory[0].body, "first draft")
+        XCTAssertEqual(m.editVersion, 2)
+        // Survives close + reopen.
+        let reopened = try await reopen()
+        let reloaded = try await reopened.messages.fetch(id: m.id)!
+        XCTAssertEqual(reloaded.quoteSnapshot?.senderName, "Maya")
+        XCTAssertEqual(reloaded.editHistory.map(\.body), ["first draft", "second draft"])
+    }
+
+    func testStarAndPinRoundTrip() async throws {
+        let c = try await makeConversation()
+        let m = Message(
+            conversationID: c.id,
+            direction: .incoming,
+            text: "remember this",
+            isStarred: true,
+            pin: MessagePin(
+                pinnedBy: UserID("peer"),
+                pinnedByName: "Maya",
+                expiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        try await store.messages.insert(m)
+        let fetched = try await store.messages.fetch(id: m.id)!
+        XCTAssertTrue(fetched.isStarred)
+        XCTAssertEqual(fetched.pin?.pinnedByName, "Maya")
+        XCTAssertFalse(fetched.pin?.isExpired ?? true)
+    }
+
+    func testThreadRepliesAndSummaries() async throws {
+        let c = try await makeConversation()
+        let parent = try await makeMessage(in: c.id, text: "parent")
+        let r1 = Message(
+            conversationID: c.id, direction: .incoming,
+            text: "reply one", threadRootID: parent.id,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        let r2 = Message(
+            conversationID: c.id, direction: .outgoing,
+            text: "reply two", threadRootID: parent.id,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_020)
+        )
+        try await store.messages.insert(r1)
+        try await store.messages.insert(r2)
+        // Replies come back oldest-first.
+        let replies = try await store.messages.listReplies(in: c.id, threadRootID: parent.id)
+        XCTAssertEqual(replies.map(\.id), [r1.id, r2.id])
+        // One GROUP BY query backs the disclosure rows.
+        let summaries = try await store.messages.threadSummaries(in: c.id)
+        XCTAssertEqual(summaries.count, 1)
+        XCTAssertEqual(summaries[parent.id]?.replyCount, 2)
+        XCTAssertEqual(
+            summaries[parent.id]?.lastActivityAt.timeIntervalSince1970,
+            1_700_000_020, accuracy: 0.001
+        )
+    }
+
+    func testStarredMessagesListsNewestFirst() async throws {
+        let c = try await makeConversation()
+        let old = Message(
+            conversationID: c.id, direction: .incoming, text: "old star",
+            isStarred: true, createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let new = Message(
+            conversationID: c.id, direction: .incoming, text: "new star",
+            isStarred: true, createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let unstarred = try await makeMessage(in: c.id, text: "not starred")
+        try await store.messages.insert(old)
+        try await store.messages.insert(new)
+        let starred = try await store.messages.starredMessages(in: c.id)
+        XCTAssertEqual(starred.map(\.id), [new.id, old.id])
+        XCTAssertFalse(starred.map(\.id).contains(unstarred.id))
+    }
+
+    func testTombstoneClearsPinAndStar() async throws {
+        let c = try await makeConversation()
+        let m = Message(
+            conversationID: c.id, direction: .outgoing, text: "oops",
+            isStarred: true,
+            pin: MessagePin(pinnedBy: UserID("local"), pinnedByName: "Me")
+        )
+        try await store.messages.insert(m)
+        try await store.messages.applyTombstone(id: m.id, at: Date())
+        let tombstoned = try await store.messages.fetch(id: m.id)!
+        XCTAssertTrue(tombstoned.isTombstone)
+        XCTAssertFalse(tombstoned.isStarred)
+        XCTAssertNil(tombstoned.pin)
+    }
+
+    func testDisappearedMessagesListsExpirable() async throws {
+        let c = try await makeConversation()
+        let doomed = Message(
+            conversationID: c.id, direction: .incoming, text: "burn",
+            disappearAt: Date().addingTimeInterval(-1)
+        )
+        let kept = Message(
+            conversationID: c.id, direction: .incoming, text: "keep",
+            disappearAt: Date().addingTimeInterval(3600)
+        )
+        try await store.messages.insert(doomed)
+        try await store.messages.insert(kept)
+        let listed = try await store.messages.disappearedMessages(now: Date())
+        XCTAssertEqual(listed.map(\.id), [doomed.id])
+        XCTAssertEqual(try await store.messages.expungeDisappeared(now: Date()), 1)
+        XCTAssertNil(try await store.messages.fetch(id: doomed.id))
+        XCTAssertNotNil(try await store.messages.fetch(id: kept.id))
+    }
+
+    /// A v3 database (user_version=3, no v4 columns) migrates cleanly to
+    /// v4 and keeps its messages readable.
+    func testV3ToV4Migration() async throws {
+        let c = try await makeConversation()
+        let m = try await makeMessage(in: c.id, text: "before migration")
+        let conn = await store.conn
+        try conn.exec("ALTER TABLE message DROP COLUMN quote_snapshot_json;")
+        try conn.exec("ALTER TABLE message DROP COLUMN edit_history_json;")
+        try conn.exec("ALTER TABLE message DROP COLUMN is_starred;")
+        try conn.exec("ALTER TABLE message DROP COLUMN pin_json;")
+        try conn.exec("ALTER TABLE conversation DROP COLUMN disappearing_after_read;")
+        try conn.exec("DROP INDEX idx_message_thread;")
+        try conn.exec("DROP INDEX idx_message_starred;")
+        try conn.exec("DELETE FROM schema_migrations WHERE version = 4;")
+        try conn.exec("PRAGMA user_version = 3;")
+        store = nil
+
+        let migrated = try SQLCipherAegisStore.openForTesting(at: dbPath, key: testKey)
+        store = migrated
+        // Old rows read back with zero-value new fields.
+        let reloaded = try await migrated.messages.fetch(id: m.id)!
+        XCTAssertNil(reloaded.quoteSnapshot)
+        XCTAssertTrue(reloaded.editHistory.isEmpty)
+        XCTAssertFalse(reloaded.isStarred)
+        XCTAssertNil(reloaded.pin)
+        // New writes work after migration.
+        var starred = reloaded
+        starred.isStarred = true
+        try await migrated.messages.update(starred)
+        let listed = try await migrated.messages.starredMessages(in: c.id)
+        XCTAssertEqual(listed.map(\.id), [m.id])
+    }
 }

@@ -8,9 +8,12 @@ import UniformTypeIdentifiers
 /// channel permissions so it's never a dead control.
 struct ComposerView: View {
     @ObservedObject var viewModel: ConversationViewModel
+    var onCreatePoll: () -> Void = {}
+    var onShowStarred: () -> Void = {}
     @EnvironmentObject private var appState: AppState
 
     @State private var showingAttachMenu = false
+    @State private var showingMoreMenu = false
     @State private var showingPhotoPicker = false
     @State private var showingFilePicker = false
     @State private var photoItem: PhotosPickerItem?
@@ -83,6 +86,11 @@ struct ComposerView: View {
             Button("File") { showingFilePicker = true }
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog("More", isPresented: $showingMoreMenu, titleVisibility: .hidden) {
+            Button("Create poll") { onCreatePoll() }
+            Button("Starred messages") { onShowStarred() }
+            Button("Cancel", role: .cancel) {}
+        }
         .photosPicker(isPresented: $showingPhotoPicker, selection: $photoItem, matching: .any(of: [.images, .videos]))
         .fileImporter(isPresented: $showingFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
             handleFileImport(result)
@@ -125,6 +133,17 @@ struct ComposerView: View {
                 .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
                 .accessibilityLabel("Attach a photo or file")
             }
+
+            Button {
+                showingMoreMenu = true
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(AegisColors.accent)
+            }
+            .frame(minWidth: AegisLayout.minTapTarget, minHeight: AegisLayout.minTapTarget)
+            .accessibilityLabel("More actions")
+            .accessibilityHint("Create a poll or view starred messages")
 
             TextField("Message", text: $viewModel.draft, axis: .vertical)
                 .font(AegisType.body)
@@ -184,9 +203,26 @@ struct ComposerView: View {
     // MARK: - Reply / edit banners
 
     private func replyBanner(for message: Message, onCancel: @escaping () -> Void) -> some View {
-        banner(title: "Replying to \(message.isFromMe ? "yourself" : "message")",
-               body: message.body ?? "📎 Attachment",
-               onCancel: onCancel)
+        VStack(spacing: 0) {
+            banner(title: "Replying to \(message.isFromMe ? "yourself" : "message")",
+                   body: message.body ?? "📎 Attachment",
+                   onCancel: onCancel)
+            if message.isEphemeral {
+                // The quote snapshot inherits the original's expiry: warn
+                // that the quoted context may vanish on its own timer.
+                HStack(spacing: AegisLayout.xs) {
+                    Image(systemName: "timer")
+                        .font(AegisType.caption)
+                        .accessibilityHidden(true)
+                    Text("That message is disappearing — your quote keeps its own copy on its original timer.")
+                        .font(AegisType.caption)
+                }
+                .foregroundStyle(AegisColors.warning)
+                .padding(.horizontal, AegisLayout.l)
+                .padding(.vertical, AegisLayout.xs)
+                .accessibilityLabel("Warning: the quoted message is disappearing. Your quote keeps a copy on the original timer.")
+            }
+        }
     }
 
     private func editBanner(onCancel: @escaping () -> Void) -> some View {

@@ -109,6 +109,7 @@ final class ConversationViewModel: ObservableObject {
             contactsByID = Dictionary(uniqueKeysWithValues: contacts.map { ($0.id, $0) })
             // Drop any that expired while we were away.
             _ = try? await store.purgeExpiredMessages()
+            await refreshThreadSummaries()
         } catch {
             loadError = error.localizedDescription
         }
@@ -153,6 +154,18 @@ final class ConversationViewModel: ObservableObject {
         messages.first { $0.id == id }
     }
 
+    /// Pages history backwards until the message is loaded (or history is
+    /// exhausted). Used by jump-to-message from quotes, pins, and stars.
+    func ensureMessageLoaded(_ id: UUID) async -> Bool {
+        for _ in 0..<25 {
+            if message(withId: id) != nil { return true }
+            let oldestBefore = messages.first?.id
+            await loadMore()
+            if messages.first?.id == oldestBefore { break }
+        }
+        return message(withId: id) != nil
+    }
+
     // MARK: - Sending
 
     var canSend: Bool {
@@ -169,26 +182,65 @@ final class ConversationViewModel: ObservableObject {
     func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSend else { return }
-        let replyToID = replyingTo?.id
+        let replying = replyingTo
         draft = ""
         replyingTo = nil
-        await sendText(body: text, replyToID: replyToID, attachment: nil, voiceNote: nil)
+        await sendText(
+            body: text,
+            replyToID: replying?.id,
+            quote: replying.map { quoteSnapshot(for: $0) },
+            threadRootID: nil,
+            attachment: nil,
+            voiceNote: nil
+        )
+    }
+
+    /// Builds a frozen quote snapshot of the message being replied to.
+    func quoteSnapshot(for message: Message) -> QuoteSnapshot {
+        let name: String
+        if message.isFromMe {
+            name = "You"
+        } else {
+            name = senderName(for: message) ?? contact?.displayName ?? "Unknown"
+        }
+        return message.makeQuoteSnapshot(senderName: name)
+    }
+
+    /// Sends a reply inside a thread anchored at `parentID`.
+    func sendThreadReply(to parentID: UUID, body: String) async {
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, canSend else { return }
+        await sendText(
+            body: text,
+            replyToID: nil,
+            quote: nil,
+            threadRootID: parentID,
+            attachment: nil,
+            voiceNote: nil
+        )
     }
 
     private func sendText(
         body: String?,
         replyToID: UUID?,
+        quote: QuoteSnapshot?,
+        threadRootID: UUID?,
         attachment: Attachment?,
         voiceNote: VoiceNote?
     ) async {
         guard let me = appState.identity else { return }
         // Linked secondary: relay the send through the primary device.
+        // (Device-link v1 carries text only: thread/quote metadata is
+        // dropped on this path and the primary echoes a plain message.)
         if appState.isLinkedDevice, attachment == nil, voiceNote == nil {
             await sendTextViaPrimary(body: body, replyToID: replyToID, senderID: me.id)
             return
         }
         let messageID = UUID()
-        let expiresAt = conversation.disappearingInterval.map { Date().addingTimeInterval($0) }
+        let afterRead = conversation.disappearingAfterRead
+        let expiresAt = conversation.disappearingInterval.flatMap {
+            afterRead ? nil : Date().addingTimeInterval($0)
+        }
 
         var message = Message(
             conversationID: conversation.id,
@@ -196,8 +248,11 @@ final class ConversationViewModel: ObservableObject {
             isFromMe: true,
             body: body,
             replyToID: replyToID,
+            quoteSnapshot: quote,
             status: .sending,
             expiresAt: expiresAt,
+            disappearAfterReadInterval: afterRead ? conversation.disappearingInterval : nil,
+            threadRootID: threadRootID,
             attachment: attachment,
             voiceNote: voiceNote,
             sentAt: Date()
@@ -211,9 +266,12 @@ final class ConversationViewModel: ObservableObject {
                 id: messageID,
                 body: body,
                 replyToID: replyToID,
+                quote: quote,
+                threadRootID: threadRootID,
                 attachment: attachment,
                 voiceNote: voiceNote,
-                expiresIn: conversation.disappearingInterval
+                expiresIn: conversation.disappearingInterval,
+                disappearAfterRead: afterRead ? true : nil
             )
             // Identity-rotation hint (encrypted): lets the recipient link our
             // new identity to the previous one and show "safety number
@@ -291,9 +349,12 @@ final class ConversationViewModel: ObservableObject {
                 id: retried.id,
                 body: retried.body,
                 replyToID: retried.replyToID,
+                quote: retried.quoteSnapshot,
+                threadRootID: retried.threadRootID,
                 attachment: retried.attachment,
                 voiceNote: retried.voiceNote,
-                expiresIn: conversation.disappearingInterval
+                expiresIn: conversation.disappearingInterval,
+                disappearAfterRead: retried.disappearAfterReadInterval == nil ? nil : true
             )
             payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
             let ciphertext = try await crypto.encryptMessage(
@@ -565,14 +626,36 @@ final class ConversationViewModel: ObservableObject {
 
     // MARK: - Reactions / edits / deletes
 
+    /// Sends a signed event payload (reaction, edit, tombstone, ballot,
+    /// pin). The identity signature binds the event to our long-term key;
+    /// the AEAD channel authenticates the session.
+    private func sendSignedEvent(_ payload: WirePayload, kind: EnvelopeKind) async -> Bool {
+        do {
+            var signed = payload
+            let signature = try await crypto.signWithIdentity(signed.signableBytes())
+            signed.attachSignature(signature)
+            let ciphertext = try await crypto.encryptMessage(
+                signed.encoded(),
+                conversationID: conversation.id,
+                recipientKeys: await recipientKeys()
+            )
+            try await transport.sendEnvelope(OutgoingEnvelope(
+                id: UUID(), conversationID: conversation.id,
+                ciphertext: ciphertext, kind: kind
+            ))
+            return true
+        } catch {
+            sendError = error.localizedDescription
+            return false
+        }
+    }
+
     func toggleReaction(_ emoji: String, on message: Message) async {
-        guard let me = appState.identity else { return }
+        guard let me = appState.identity, !message.isDeleted else { return }
         var updated = message
         var reactors = updated.reactions[emoji] ?? []
-        let adding: Bool
         if let idx = reactors.firstIndex(of: me.id) {
             reactors.remove(at: idx)
-            adding = false
             if reactors.isEmpty {
                 updated.reactions.removeValue(forKey: emoji)
             } else {
@@ -581,79 +664,320 @@ final class ConversationViewModel: ObservableObject {
         } else {
             reactors.append(me.id)
             updated.reactions[emoji] = reactors
-            adding = true
         }
         try? await store.updateMessage(updated)
         upsert(updated)
         Haptics.impact(.light)
 
-        // Sync the delta to peers (toggle is idempotent on receipt).
-        if adding {
-            do {
-                let payload = WirePayload.reaction(targetMessageID: message.id, emoji: emoji)
-                let ciphertext = try await crypto.encryptMessage(
-                    payload.encoded(),
-                    conversationID: conversation.id,
-                    recipientKeys: await recipientKeys()
-                )
-                try await transport.sendEnvelope(OutgoingEnvelope(
-                    id: UUID(), conversationID: conversation.id,
-                    ciphertext: ciphertext, kind: .reaction
-                ))
-            } catch {
-                sendError = error.localizedDescription
-            }
+        // Sync the delta to peers as a signed event (toggle is idempotent
+        // on receipt, so adds and removals both propagate).
+        let payload = WirePayload.reaction(targetMessageID: message.id, emoji: emoji)
+        await sendSignedEvent(payload, kind: .reaction)
+    }
+
+    /// The configured edit window (default 48h, 0 = disabled).
+    var editWindowSeconds: TimeInterval {
+        guard UserDefaults.standard.object(forKey: SettingsKeys.editWindowSeconds) != nil else {
+            return defaultEditWindowSeconds
         }
+        return UserDefaults.standard.double(forKey: SettingsKeys.editWindowSeconds)
+    }
+
+    func canEdit(_ message: Message) -> Bool {
+        canEditMessage(message, windowSeconds: editWindowSeconds)
+    }
+
+    /// Time remaining in the edit window for `message`, nil when not editable.
+    func editWindowRemaining(for message: Message) -> TimeInterval? {
+        guard canEdit(message) else { return nil }
+        let elapsed = Date().timeIntervalSince(message.sentAt)
+        return max(0, editWindowSeconds - elapsed)
     }
 
     func editMessage(_ message: Message, newBody: String) async {
         let trimmed = newBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard message.isFromMe, !message.isDeleted, !trimmed.isEmpty,
-              trimmed != message.body else { return }
+        guard canEdit(message), !trimmed.isEmpty, trimmed != message.body else {
+            if !canEdit(message) {
+                sendError = "The edit window for this message has closed."
+            }
+            return
+        }
         var updated = message
+        // Local version history: keep the pre-edit body.
+        if let previous = updated.body {
+            updated.editHistory.append(MessageEdit(body: previous, editedAt: Date()))
+        }
         updated.body = trimmed
         updated.editedAt = Date()
         try? await store.updateMessage(updated)
         upsert(updated)
-        do {
-            let payload = WirePayload.edit(targetMessageID: message.id, editedBody: trimmed)
-            let ciphertext = try await crypto.encryptMessage(
-                payload.encoded(),
-                conversationID: conversation.id,
-                recipientKeys: await recipientKeys()
-            )
-            try await transport.sendEnvelope(OutgoingEnvelope(
-                id: UUID(), conversationID: conversation.id,
-                ciphertext: ciphertext, kind: .edit
-            ))
-        } catch {
-            sendError = error.localizedDescription
-        }
+        Haptics.notification(.success)
+        let payload = WirePayload.edit(targetMessageID: message.id, editedBody: trimmed)
+        await sendSignedEvent(payload, kind: .edit)
     }
 
     func deleteMessage(_ message: Message) async {
+        guard message.isFromMe, !message.isDeleted else { return }
+        // Store tombstone path: drops attachment metadata and
+        // cryptographically wipes the Keychain wrapped keys + cached files.
+        try? await store.deleteMessage(id: message.id, conversationID: message.conversationID)
+        if let tombstoned = try? await store.fetchMessage(id: message.id, conversationID: message.conversationID) {
+            upsert(tombstoned)
+        } else {
+            var fallback = message
+            fallback.body = nil
+            fallback.attachment = nil
+            fallback.voiceNote = nil
+            fallback.poll = nil
+            fallback.deletedAt = Date()
+            upsert(fallback)
+        }
+        Haptics.impact(.medium)
+        // Signed tombstone: propagates to participants and linked devices.
+        let payload = WirePayload.delete(targetMessageID: message.id)
+        await sendSignedEvent(payload, kind: .delete)
+    }
+
+    // MARK: - Stars (local-only)
+
+    func toggleStar(_ message: Message) async {
+        guard !message.isDeleted else { return }
         var updated = message
-        updated.body = nil
-        updated.attachment = nil
-        updated.voiceNote = nil
-        updated.deletedAt = Date()
+        updated.isStarred.toggle()
         try? await store.updateMessage(updated)
         upsert(updated)
-        Haptics.impact(.medium)
+        Haptics.selection()
+        await loadStarred()
+    }
+
+    @Published private(set) var starredMessages: [Message] = []
+    @Published private(set) var isLoadingStarred = false
+
+    func loadStarred() async {
+        isLoadingStarred = true
+        defer { isLoadingStarred = false }
+        starredMessages = (try? await store.fetchStarredMessages(conversationID: conversation.id)) ?? []
+    }
+
+    // MARK: - Pins (shared, admin-controlled)
+
+    /// Whether the local user may pin in this conversation: anyone in a
+    /// 1:1 chat, moderators+ in groups/channels.
+    var canPin: Bool {
+        switch conversation.kind {
+        case .direct: return true
+        case .group, .channel, .vault: return conversation.myRole?.canModerate ?? false
+        }
+    }
+
+    /// Messages with an active (non-expired) pin, newest pin first.
+    var activePins: [Message] {
+        messages.filter(\.isPinned)
+            .sorted { ($0.pin?.pinnedAt ?? .distantPast) > ($1.pin?.pinnedAt ?? .distantPast) }
+    }
+
+    func pinMessage(_ message: Message, expiresAt: Date?) async {
+        guard canPin, !message.isDeleted, !message.isPinned else { return }
+        // Pinning a disappearing message is blocked: the pin would
+        // outlive (and thereby resurrect) content the timer killed.
+        guard !message.isEphemeral else {
+            sendError = "Disappearing messages can't be pinned."
+            return
+        }
+        guard let me = appState.identity else { return }
+        let name = "You"
+        var updated = message
+        updated.pin = MessagePin(
+            pinnedBy: me.id,
+            pinnedByName: name,
+            pinnedAt: Date(),
+            expiresAt: expiresAt
+        )
+        try? await store.updateMessage(updated)
+        upsert(updated)
+        Haptics.notification(.success)
+        let payload = WirePayload.pin(targetMessageID: message.id, expiresAt: expiresAt)
+        await sendSignedEvent(payload, kind: .pin)
+    }
+
+    func unpinMessage(_ message: Message) async {
+        guard canPin, message.isPinned else { return }
+        var updated = message
+        updated.pin = nil
+        try? await store.updateMessage(updated)
+        upsert(updated)
+        Haptics.selection()
+        let payload = WirePayload.unpin(targetMessageID: message.id)
+        await sendSignedEvent(payload, kind: .pin)
+    }
+
+    // MARK: - Threads
+
+    /// Thread root ID -> summary, refreshed on load and on new arrivals.
+    @Published private(set) var threadSummaries: [UUID: ThreadSummary] = [:]
+
+    /// Per-thread last-read timestamps (local-only), for unread badges.
+    @Published private(set) var threadReadAt: [UUID: Date] = [:]
+
+    private var threadReadDefaultsKey: String { "threads.lastRead.\(conversation.id.uuidString)" }
+
+    func refreshThreadSummaries() async {
+        threadSummaries = (try? await store.fetchThreadSummaries(conversationID: conversation.id)) ?? [:]
+        if let data = UserDefaults.standard.data(forKey: threadReadDefaultsKey),
+           let decoded = try? JSONDecoder().decode([String: Date].self, from: data) {
+            threadReadAt = Dictionary(
+                uniqueKeysWithValues: decoded.compactMap { key, value in
+                    UUID(uuidString: key).map { ($0, value) }
+                }
+            )
+        }
+    }
+
+    func markThreadRead(_ rootID: UUID) {
+        threadReadAt[rootID] = Date()
+        let encoded = Dictionary(
+            uniqueKeysWithValues: threadReadAt.map { ($0.key.uuidString, $0.value) }
+        )
+        if let data = try? JSONEncoder().encode(encoded) {
+            UserDefaults.standard.set(data, forKey: threadReadDefaultsKey)
+        }
+    }
+
+    func threadHasUnread(_ rootID: UUID) -> Bool {
+        guard let summary = threadSummaries[rootID] else { return false }
+        guard let readAt = threadReadAt[rootID] else { return true }
+        return summary.lastActivityAt > readAt
+    }
+
+    func threadReplies(for rootID: UUID) async -> [Message] {
+        (try? await store.fetchThreadReplies(conversationID: conversation.id, threadRootID: rootID)) ?? []
+    }
+
+    // MARK: - Polls
+
+    /// Creates and sends a poll. Returns false when validation fails
+    /// (question/options are validated by the composer; this is the last
+    /// line of defense).
+    @discardableResult
+    func createPoll(
+        question: String,
+        options: [String],
+        allowsMultipleChoice: Bool,
+        isAnonymous: Bool,
+        closesAt: Date?,
+        expiresIn: TimeInterval? = nil
+    ) async -> Bool {
+        guard let me = appState.identity, canSend else { return false }
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opts = options.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !q.isEmpty, opts.count >= 2, opts.count <= 10 else {
+            sendError = "Polls need a question and 2–10 options."
+            return false
+        }
+        let eligible: Int? = conversation.kind == .direct ? nil : max(2, conversation.memberIDs.count)
+        let poll = PollMessage(
+            question: String(q.prefix(280)),
+            options: opts.map { String($0.prefix(100)) },
+            allowsMultipleChoice: allowsMultipleChoice,
+            isAnonymous: isAnonymous,
+            closesAt: closesAt,
+            tally: [:],
+            voters: [],
+            voterChoices: [:],
+            myChoices: [],
+            eligibleVoterCount: eligible
+        )
+        let messageID = UUID()
+        let afterRead = conversation.disappearingAfterRead
+        var message = Message(
+            id: messageID,
+            conversationID: conversation.id,
+            senderID: me.id,
+            isFromMe: true,
+            body: nil,
+            status: .sending,
+            expiresAt: afterRead ? nil : expiresIn ?? conversation.disappearingInterval.map { Date().addingTimeInterval($0) },
+            disappearAfterReadInterval: afterRead ? (expiresIn ?? conversation.disappearingInterval) : nil,
+            poll: poll,
+            sentAt: Date()
+        )
+        // The store's poll-message validation requires content: polls ride
+        // as kind == .poll, which the store accepts.
+        try? await store.saveMessage(message)
+        upsert(message)
+        Haptics.impact(.light)
+
         do {
-            let payload = WirePayload.delete(targetMessageID: message.id)
+            var payload = WirePayload.poll(
+                id: messageID,
+                question: poll.question,
+                options: poll.options,
+                allowsMultipleChoice: poll.allowsMultipleChoice,
+                anonymous: poll.isAnonymous,
+                closesAt: poll.closesAt,
+                eligibleVoterCount: poll.eligibleVoterCount,
+                expiresIn: expiresIn ?? conversation.disappearingInterval,
+                disappearAfterRead: afterRead ? true : nil
+            )
+            payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
             let ciphertext = try await crypto.encryptMessage(
                 payload.encoded(),
                 conversationID: conversation.id,
                 recipientKeys: await recipientKeys()
             )
             try await transport.sendEnvelope(OutgoingEnvelope(
-                id: UUID(), conversationID: conversation.id,
-                ciphertext: ciphertext, kind: .delete
+                id: messageID,
+                conversationID: conversation.id,
+                ciphertext: ciphertext,
+                kind: .poll
             ))
+            message.status = .sent
         } catch {
+            message.status = .failed
             sendError = error.localizedDescription
         }
+        try? await store.updateMessage(message)
+        upsert(message)
+        return message.status != .failed
+    }
+
+    /// Casts (or changes) our vote on a poll. Enforces single/multi-choice,
+    /// anonymity (no changes), and the close deadline.
+    func castVote(on pollMessage: Message, choices: [Int]) async {
+        guard let me = appState.identity,
+              var poll = pollMessage.poll,
+              !pollMessage.isDeleted else { return }
+        guard poll.canVote(voter: me.id, choices: choices) else {
+            if poll.isClosed {
+                sendError = "This poll has closed."
+            } else if poll.isAnonymous && poll.voters.contains(me.id) {
+                sendError = "Anonymous votes can't be changed."
+            } else {
+                sendError = "That vote isn't valid for this poll."
+            }
+            return
+        }
+        // Retract our previous ballot locally (non-anonymous only; the
+        // poll struct handles the tally math).
+        if !poll.isAnonymous, let previous = poll.previousChoices(of: me.id) {
+            for option in previous {
+                poll.tally[option] = max(0, (poll.tally[option] ?? 1) - 1)
+            }
+        }
+        for option in choices { poll.tally[option, default: 0] += 1 }
+        if !poll.voters.contains(me.id) { poll.voters.append(me.id) }
+        if !poll.isAnonymous { poll.voterChoices[me.id] = choices }
+        poll.myChoices = choices
+        var updated = pollMessage
+        updated.poll = poll
+        try? await store.updateMessage(updated)
+        upsert(updated)
+        Haptics.selection()
+
+        // Signed ballot: the tally is recomputed from ballots on receipt.
+        let payload = WirePayload.ballot(targetMessageID: pollMessage.id, choices: choices)
+        await sendSignedEvent(payload, kind: .ballot)
     }
 
     // MARK: - Read receipts & typing
@@ -663,8 +987,13 @@ final class ConversationViewModel: ObservableObject {
               UserDefaults.standard.bool(forKey: SettingsKeys.readReceiptsDefault) else { return }
         let unread = messages.filter { !$0.isFromMe && $0.status == .delivered }
         guard !unread.isEmpty else { return }
+        let now = Date()
         for var message in unread {
             message.status = .read
+            // "Disappear after read": the timer starts now.
+            if let interval = message.disappearAfterReadInterval, message.expiresAt == nil {
+                message.expiresAt = now.addingTimeInterval(interval)
+            }
             try? await store.updateMessage(message)
             upsert(message)
         }
@@ -729,6 +1058,8 @@ final class ConversationViewModel: ObservableObject {
                     // The identity-change notice arrives here too: refresh
                     // the banner / held-message state.
                     await self?.refreshIdentityChangeState()
+                    // Keep thread disclosures fresh as replies land.
+                    await self?.refreshThreadSummaries()
                 }
             }
             .store(in: &cancellables)
@@ -757,9 +1088,10 @@ final class ConversationViewModel: ObservableObject {
 
     // MARK: - Disappearing messages
 
-    func setDisappearing(_ interval: TimeInterval?) async {
+    func setDisappearing(_ interval: TimeInterval?, afterRead: Bool = false) async {
         var updated = conversation
         updated.disappearingInterval = interval
+        updated.disappearingAfterRead = afterRead && interval != nil
         try? await store.saveConversation(updated)
         conversation = updated
         Haptics.selection()

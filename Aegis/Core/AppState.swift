@@ -177,14 +177,36 @@ final class AppState: ObservableObject {
             try? await store.updateMessage(failed)
             return
         }
-        var payload = WirePayload.text(
-            id: message.id,
-            body: message.body,
-            replyToID: message.replyToID,
-            attachment: message.attachment,
-            voiceNote: message.voiceNote,
-            expiresIn: conversation.disappearingInterval
-        )
+        // Polls re-send as polls (a text rebuild would drop the ballot box).
+        let envelopeKind: EnvelopeKind
+        var payload: WirePayload
+        if let poll = message.poll {
+            payload = WirePayload.poll(
+                id: message.id,
+                question: poll.question,
+                options: poll.options,
+                allowsMultipleChoice: poll.allowsMultipleChoice,
+                anonymous: poll.isAnonymous,
+                closesAt: poll.closesAt,
+                eligibleVoterCount: poll.eligibleVoterCount,
+                expiresIn: conversation.disappearingInterval,
+                disappearAfterRead: message.disappearAfterReadInterval == nil ? nil : true
+            )
+            envelopeKind = .poll
+        } else {
+            payload = WirePayload.text(
+                id: message.id,
+                body: message.body,
+                replyToID: message.replyToID,
+                quote: message.quoteSnapshot,
+                threadRootID: message.threadRootID,
+                attachment: message.attachment,
+                voiceNote: message.voiceNote,
+                expiresIn: conversation.disappearingInterval,
+                disappearAfterRead: message.disappearAfterReadInterval == nil ? nil : true
+            )
+            envelopeKind = .message
+        }
         payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
         // Recipient keys: DM peer's key, or group members' keys.
         let contacts = (try? await store.fetchContacts()) ?? []
@@ -209,7 +231,7 @@ final class AppState: ObservableObject {
                 id: message.id,
                 conversationID: conversation.id,
                 ciphertext: ciphertext,
-                kind: .message
+                kind: envelopeKind
             ))
             var sent = message
             sent.status = .sent
@@ -329,9 +351,17 @@ final class AppState: ObservableObject {
             case .reaction:
                 await handleIncomingReaction(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .edit:
-                await handleIncomingEdit(payload)
+                await handleIncomingEdit(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .delete:
-                await handleIncomingDelete(payload)
+                await handleIncomingDelete(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
+            case .poll:
+                await handleIncomingPoll(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
+            case .ballot:
+                await handleIncomingBallot(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
+            case .pin:
+                await handleIncomingPin(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
+            case .unpin:
+                await handleIncomingUnpin(payload, envelope: envelope, senderIdentity: fullSenderIdentity)
             case .readReceipt:
                 await handleIncomingReadReceipt(payload, from: envelope.senderKey)
             case .typing:
@@ -480,11 +510,43 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Verifies the identity signature on signed event payloads
+    /// (reaction, edit, delete, ballot, pin, unpin). Returns true for
+    /// kinds that aren't signature-gated. A gated kind that is unsigned
+    /// or badly signed is dropped (returns false) — the AEAD channel
+    /// alone is not enough to attribute these events to the long-term
+    /// identity.
+    private func verifyEventSignature(
+        _ payload: WirePayload,
+        envelope: IncomingEnvelope,
+        senderIdentity: Data?
+    ) async -> Bool {
+        guard WirePayload.signedKinds.contains(payload.kind) else { return true }
+        let signingKey: Data?
+        if let senderIdentity,
+           let identity = try? IdentityPublic(serialized: senderIdentity) {
+            signingKey = identity.signingPublicKey
+        } else {
+            // Group sender-key path: the decrypt layer doesn't hand us the
+            // full identity, so resolve it from the roster/contact.
+            let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
+            signingKey = (try? IdentityPublic(serialized: contact.identityKey))?.signingPublicKey
+        }
+        guard let signingKey, payload.verifySignature(signingPublicKey: signingKey) else {
+            #if DEBUG
+            print("[Aegis] Dropping \(payload.kind) event: missing/invalid identity signature")
+            #endif
+            return false
+        }
+        return true
+    }
+
     private func handleIncomingText(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard var conversation = try? await store.fetchConversation(id: envelope.conversationID),
               let messageID = payload.messageID else { return }
         let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
-        let expiresAt = payload.expiresIn.map { Date().addingTimeInterval($0) }
+        let afterRead = payload.disappearAfterRead ?? false
+        let expiresAt = payload.expiresIn.flatMap { afterRead ? nil : Date().addingTimeInterval($0) }
 
         let message = Message(
             id: messageID,
@@ -493,8 +555,11 @@ final class AppState: ObservableObject {
             isFromMe: false,
             body: payload.body,
             replyToID: payload.replyToID,
+            quoteSnapshot: payload.quote,
             status: .delivered,
             expiresAt: expiresAt,
+            disappearAfterReadInterval: afterRead ? payload.expiresIn : nil,
+            threadRootID: payload.threadRootID,
             attachment: payload.attachment,
             voiceNote: payload.voiceNote,
             sentAt: envelope.receivedAt
@@ -527,6 +592,7 @@ final class AppState: ObservableObject {
 
     private func handleIncomingReaction(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard let target = payload.targetMessageID, let emoji = payload.emoji else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
         let reactor = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         let conversations = (try? await store.fetchConversations()) ?? []
         for conversation in conversations {
@@ -552,21 +618,168 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func handleIncomingEdit(_ payload: WirePayload) async {
+    private func handleIncomingEdit(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard let target = payload.targetMessageID, let editedBody = payload.editedBody else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
+        let editor = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         await mutateMessage(id: target) { message in
+            // Only the author may edit their own message, and never a
+            // tombstone. The edit window is the recipient's local policy;
+            // late edits are still applied but flagged (the sender's
+            // client enforces the window before sending).
+            guard !message.isDeleted, message.senderID == editor.id else { return }
+            if let previous = message.body, previous != editedBody {
+                message.editHistory.append(MessageEdit(body: previous, editedAt: Date()))
+            }
             message.body = editedBody
             message.editedAt = Date()
         }
     }
 
-    private func handleIncomingDelete(_ payload: WirePayload) async {
+    private func handleIncomingDelete(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
         guard let target = payload.targetMessageID else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
+        let deleter = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
+        // Route through the store's tombstone path so attachment metadata
+        // is dropped and out-of-band secrets (Keychain keys, cached files)
+        // are cryptographically wiped — not just blanked in the UI.
+        let conversations = (try? await store.fetchConversations()) ?? []
+        for conversation in conversations {
+            guard let message = try? await store.fetchMessage(id: target, conversationID: conversation.id) else {
+                continue
+            }
+            // Only the author may tombstone their own message.
+            guard message.senderID == deleter.id else {
+                #if DEBUG
+                print("[Aegis] Dropping delete: sender is not the message author")
+                #endif
+                return
+            }
+            try? await store.deleteMessage(id: target, conversationID: conversation.id)
+            if let tombstoned = try? await store.fetchMessage(id: target, conversationID: conversation.id) {
+                inboundSubject.send(tombstoned)
+            } else {
+                var fallback = message
+                fallback.deletedAt = Date()
+                inboundSubject.send(fallback)
+            }
+            return
+        }
+    }
+
+    // MARK: - Polls
+
+    private func handleIncomingPoll(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        guard var conversation = try? await store.fetchConversation(id: envelope.conversationID),
+              let messageID = payload.messageID,
+              let question = payload.pollQuestion,
+              let options = payload.pollOptions, options.count >= 2 else { return }
+        let contact = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
+        let afterRead = payload.disappearAfterRead ?? false
+        let poll = PollMessage(
+            question: String(question.prefix(280)),
+            options: options.map { String($0.prefix(100)) },
+            allowsMultipleChoice: payload.pollAllowsMultipleChoice ?? false,
+            isAnonymous: payload.pollAnonymous ?? false,
+            closesAt: payload.pollClosesAt,
+            tally: [:],
+            voters: [],
+            voterChoices: [:],
+            myChoices: [],
+            eligibleVoterCount: payload.pollEligibleVoterCount
+        )
+        let message = Message(
+            id: messageID,
+            conversationID: conversation.id,
+            senderID: contact.id,
+            isFromMe: false,
+            body: nil,
+            status: .delivered,
+            expiresAt: afterRead ? nil : payload.expiresIn.map { Date().addingTimeInterval($0) },
+            disappearAfterReadInterval: afterRead ? payload.expiresIn : nil,
+            poll: poll,
+            sentAt: envelope.receivedAt
+        )
+        try? await store.saveMessage(message)
+        await forwardToLinkedDevices(message, conversation: conversation, senderName: contact.displayName)
+
+        conversation.unreadCount += (visibleConversationID == conversation.id) ? 0 : 1
+        conversation.lastMessagePreview = previewText(for: message, senderName: contact.displayName)
+        conversation.lastMessageAt = message.sentAt
+        conversation.lastMessageIsFromMe = false
+        try? await store.saveConversation(conversation)
+
+        inboundSubject.send(message)
+
+        let isBackgrounded = UIApplication.shared.applicationState != .active
+        if (isBackgrounded || visibleConversationID != conversation.id) && !conversation.isMuted {
+            notifications.notifyMessage(
+                from: contact.displayName,
+                preview: previewText(for: message, senderName: nil),
+                conversationID: conversation.id
+            )
+        }
+        Haptics.impact(.light)
+    }
+
+    private func handleIncomingBallot(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        guard let target = payload.targetMessageID, let choices = payload.ballotChoices else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
+        let voter = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
         await mutateMessage(id: target) { message in
-            message.body = nil
-            message.attachment = nil
-            message.voiceNote = nil
-            message.deletedAt = Date()
+            guard var poll = message.poll, !message.isDeleted else { return }
+            // Client-side tally from signed ballots: invalid ballots
+            // (double votes, closed polls, out-of-range) are ignored.
+            if poll.applyBallot(voter: voter.id, choices: choices) {
+                message.poll = poll
+            }
+        }
+    }
+
+    // MARK: - Pins
+
+    /// Whether `pinner` may pin in `conversation`: anyone in a 1:1 chat,
+    /// moderators+ in groups/channels. Membership roles are keyed by the
+    /// contact's UUID string; unknown role fails closed (no pin).
+    private func canPin(_ pinner: Contact, in conversation: Conversation) async -> Bool {
+        switch conversation.kind {
+        case .direct:
+            return true
+        case .group, .channel, .vault:
+            // Our own pins use the conversation's cached role.
+            if pinner.id == identity?.id {
+                return conversation.myRole?.canModerate ?? false
+            }
+            let roles = (try? await store.fetchMembershipRoles(conversationID: conversation.id)) ?? [:]
+            return roles[pinner.id.uuidString]?.canModerate ?? false
+        }
+    }
+
+    private func handleIncomingPin(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        guard let target = payload.targetMessageID else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
+        guard let conversation = try? await store.fetchConversation(id: envelope.conversationID) else { return }
+        let pinner = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
+        guard await canPin(pinner, in: conversation) else { return }
+        await mutateMessage(id: target) { message in
+            guard !message.isDeleted else { return }
+            message.pin = MessagePin(
+                pinnedBy: pinner.id,
+                pinnedByName: pinner.displayName,
+                pinnedAt: Date(),
+                expiresAt: payload.pinExpiresAt
+            )
+        }
+    }
+
+    private func handleIncomingUnpin(_ payload: WirePayload, envelope: IncomingEnvelope, senderIdentity: Data?) async {
+        guard let target = payload.targetMessageID else { return }
+        guard await verifyEventSignature(payload, envelope: envelope, senderIdentity: senderIdentity) else { return }
+        guard let conversation = try? await store.fetchConversation(id: envelope.conversationID) else { return }
+        let pinner = await resolveContact(for: envelope.senderKey, fullIdentity: senderIdentity)
+        guard await canPin(pinner, in: conversation) else { return }
+        await mutateMessage(id: target) { message in
+            message.pin = nil
         }
     }
 
@@ -578,6 +791,11 @@ final class AppState: ObservableObject {
             var changed = false
             for var message in messages where ids.contains(message.id) && message.isFromMe {
                 message.status = .read
+                // "Disappear after read": the sender's timer starts when the
+                // recipient reads.
+                if let interval = message.disappearAfterReadInterval, message.expiresAt == nil {
+                    message.expiresAt = Date().addingTimeInterval(interval)
+                }
                 try? await store.updateMessage(message)
                 changed = true
             }
@@ -720,6 +938,9 @@ final class AppState: ObservableObject {
     private func previewText(for message: Message, senderName: String?) -> String {
         let prefix = senderName.map { "\($0): " } ?? ""
         if message.isDeleted { return prefix + "Message deleted" }
+        if let poll = message.poll {
+            return prefix + "📊 \(poll.question)"
+        }
         if let voiceNote = message.voiceNote {
             return prefix + "🎤 Voice note (\(Formatters.duration(voiceNote.duration)))"
         }
@@ -1101,9 +1322,12 @@ final class AppState: ObservableObject {
                 id: req.messageID,
                 body: req.body,
                 replyToID: req.replyToID,
+                quote: nil,
+                threadRootID: nil,
                 attachment: nil,
                 voiceNote: nil,
-                expiresIn: conversation.disappearingInterval
+                expiresIn: conversation.disappearingInterval,
+                disappearAfterRead: nil
             )
             payload.previousFingerprint = await crypto.supersededIdentityFingerprint()
             let ciphertext = try await crypto.encryptMessage(
@@ -1188,10 +1412,13 @@ private extension ConversationKind {
 
 private extension Message {
     func asLinked(senderName: String? = nil) -> LinkedMessage {
-        LinkedMessage(
+        // Device-link v1 carries text only: polls degrade to a readable
+        // placeholder on the linked device rather than a blank bubble.
+        let linkedBody = body ?? poll.map { "📊 \($0.question)" }
+        return LinkedMessage(
             id: id,
             conversationID: conversationID,
-            body: body,
+            body: linkedBody,
             replyToID: replyToID,
             isFromMe: isFromMe,
             senderName: senderName,

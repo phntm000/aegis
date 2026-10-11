@@ -38,6 +38,7 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    settingsRow(icon: "message.fill", title: "Messaging", color: Color.blue, destination: AnyView(MessagingSettingsView()))
                     settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent, destination: AnyView(PrivacySettingsView()))
                     settingsRow(icon: "paintbrush.fill", title: "Appearance", color: Color.purple, destination: AnyView(AppearanceSettingsView()))
                     settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger, destination: AnyView(NotificationsSettingsView(appState: appState)))

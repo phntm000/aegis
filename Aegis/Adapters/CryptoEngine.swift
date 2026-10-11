@@ -36,6 +36,8 @@ enum CryptoEngineError: Error, Sendable {
     case noSessionNoBundle
     /// A message arrived for an unknown session.
     case unknownSession
+    /// No identity exists (signed out / not onboarded).
+    case noIdentity
     /// Invite payload failed to parse.
     case invalidInvite(String)
     /// Unknown group.
@@ -356,6 +358,14 @@ actor CryptoEngine {
         guard let identity else { throw CryptoEngineError.unknownSession }
         try persistIdentity(identity, displayName: name)
         localDisplayName = name
+    }
+
+    /// Signs `message` with the long-term Ed25519 identity key. Used for
+    /// signed message events (reactions, edits, tombstones, ballots, pins).
+    /// The seed never leaves this actor — only the signature comes back.
+    func signWithIdentity(_ message: Data) throws -> Data {
+        guard let identity else { throw CryptoEngineError.noIdentity }
+        return try identity.signingKey.sign(message, provider: CryptoKitProvider.shared)
     }
 
     func deleteIdentity() async throws {

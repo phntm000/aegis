@@ -15,6 +15,9 @@ enum EnvelopeKind: String, Sendable, Codable {
     case reaction
     case edit
     case delete
+    case poll
+    case ballot
+    case pin
     case readReceipt
     case typing
     case screenshotNotice

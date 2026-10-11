@@ -5,6 +5,7 @@ import SwiftUI
 /// to the full GroupDetailView.
 struct ConversationInfoView: View {
     @ObservedObject var viewModel: ConversationViewModel
+    var onJumpToMessage: ((UUID) -> Void)? = nil
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
@@ -14,6 +15,8 @@ struct ConversationInfoView: View {
     @State private var showingDeleteConfirm = false
     @State private var showingLeaveConfirm = false
     @State private var showingBlockConfirm = false
+    @State private var showingStarred = false
+    @State private var showingPins = false
 
     var body: some View {
         NavigationStack {
@@ -24,6 +27,7 @@ struct ConversationInfoView: View {
                 } else {
                     groupSection
                 }
+                messagesSection
                 privacySection
                 dangerSection
             }
@@ -177,6 +181,52 @@ struct ConversationInfoView: View {
                     .foregroundStyle(AegisColors.textSecondary)
             }
             .accessibilityLabel("Encryption session: \(viewModel.conversation.senderKeyStatus.displayName)")
+        }
+    }
+
+    private var messagesSection: some View {
+        Section("Messages") {
+            Button {
+                showingStarred = true
+            } label: {
+                HStack {
+                    Label("Starred messages", systemImage: "star.fill")
+                        .foregroundStyle(AegisColors.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(AegisType.caption)
+                        .foregroundStyle(AegisColors.textTertiary)
+                }
+            }
+            .accessibilityLabel("Starred messages")
+            .accessibilityHint("Stars stay on this device only")
+
+            Button {
+                showingPins = true
+            } label: {
+                HStack {
+                    Label("Pinned messages", systemImage: "pin.fill")
+                        .foregroundStyle(AegisColors.textPrimary)
+                    Spacer()
+                    Text("\(viewModel.activePins.count)")
+                        .font(AegisType.caption)
+                        .foregroundStyle(AegisColors.textSecondary)
+                    Image(systemName: "chevron.right")
+                        .font(AegisType.caption)
+                        .foregroundStyle(AegisColors.textTertiary)
+                }
+            }
+            .accessibilityLabel("Pinned messages, \(viewModel.activePins.count) pinned")
+        }
+        .sheet(isPresented: $showingStarred) {
+            StarredMessagesView(viewModel: viewModel) { id in
+                onJumpToMessage?(id)
+            }
+        }
+        .sheet(isPresented: $showingPins) {
+            PinnedMessagesSheet(viewModel: viewModel) { id in
+                onJumpToMessage?(id)
+            }
         }
     }
 
