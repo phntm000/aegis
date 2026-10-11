@@ -1,3 +1,4 @@
+import AegisModeration
 import Foundation
 
 /// Group / channel detail: members, roles, invite, topic, announcement mode,
@@ -38,7 +39,13 @@ final class GroupDetailViewModel: ObservableObject {
 
     var myRole: MemberRole? { conversation.myRole }
     var canModerate: Bool { myRole?.canModerate ?? false }
+    /// Day-to-day moderation (remove members, approve join requests):
+    /// owners, admins, and moderators.
+    var canManageMembers: Bool { myRole?.canModerateMembers ?? false }
     var isChannel: Bool { conversation.kind == .channel }
+    /// The channel's moderation snapshot (policy, audit log). Loaded lazily
+    /// for the permissions UI.
+    @Published private(set) var moderation: ChannelModerationSnapshot?
 
     func load() async {
         isLoading = true
@@ -95,9 +102,10 @@ final class GroupDetailViewModel: ObservableObject {
     }
 
     /// Approves a join request: the requester becomes a contact and is
-    /// invited with a real invite + sender-key distributions.
+    /// invited with a real invite + sender-key distributions. Moderators
+    /// may approve; only owners/admins manage roles.
     func approveJoinRequest(_ request: JoinRequest) async {
-        guard canModerate else { return }
+        guard canManageMembers else { return }
         isWorking = true
         defer { isWorking = false }
         do {
@@ -128,6 +136,8 @@ final class GroupDetailViewModel: ObservableObject {
                 updated.isAnnouncementOnly = value
                 conversation = updated
             }
+        case .slowModeChanged, .permissionsChanged:
+            await refreshModeration()
         }
     }
 
@@ -191,7 +201,9 @@ final class GroupDetailViewModel: ObservableObject {
         switch role {
         case .owner: return 0
         case .admin: return 1
-        case .member: return 2
+        case .moderator: return 2
+        case .member: return 3
+        case .guest: return 4
         }
     }
 
@@ -211,13 +223,48 @@ final class GroupDetailViewModel: ObservableObject {
     }
 
     func removeMember(_ member: GroupMember) async {
-        guard canModerate else { return }
+        guard canManageMembers else { return }
         isWorking = true
         defer { isWorking = false }
         do {
             try await transport.removeMember(member.id, from: conversation.id)
             info?.members.removeAll { $0.id == member.id }
             Haptics.impact(.medium)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Transfers ownership to another member. The current owner becomes an
+    /// admin. Destructive + irreversible — the UI confirms first.
+    func transferOwnership(to member: GroupMember) async {
+        guard myRole == .owner else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await transport.transferOwnership(to: member.id, conversationID: conversation.id)
+            var updated = conversation
+            updated.myRole = .admin
+            try await store.saveConversation(updated)
+            conversation = updated
+            try? await refreshRoster()
+            Haptics.notification(.success)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Revokes the active invite: already-issued codes stop working.
+    /// Destructive — the UI confirms first.
+    func revokeInvite() async {
+        guard canModerate else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await transport.revokeInvite(conversationID: conversation.id)
+            info?.inviteCode = nil
+            await refreshModeration()
+            Haptics.notification(.success)
         } catch {
             self.error = error.localizedDescription
         }
@@ -273,14 +320,27 @@ final class GroupDetailViewModel: ObservableObject {
         isWorking = true
         defer { isWorking = false }
         do {
-            // The invite encodes the group id + our identity for the join flow.
+            // The invite encodes the group id + generation + our identity
+            // for the join flow. The generation is the revocation mechanism:
+            // revokeInvite() bumps it, and older codes stop redeeming.
+            await refreshModeration()
+            let generation = moderation?.inviteGeneration ?? 0
             let identity = try await appState.crypto.loadIdentity()
             let code = try await appState.crypto.inviteCode(for: identity)
-            info?.inviteCode = "aegis-group:\(conversation.id.uuidString):\(code)"
+            info?.inviteCode = "aegis-group:\(conversation.id.uuidString):\(generation):\(code)"
+            await transport.noteLocalAuditEvent(
+                kind: .inviteIssued, conversationID: conversation.id, detail: "Invite generated."
+            )
             Haptics.notification(.success)
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    /// Loads the channel's moderation snapshot (permission policy, slow
+    /// mode, audit log) for the permissions UI.
+    func refreshModeration() async {
+        moderation = await transport.channelModerationSnapshot(conversationID: conversation.id)
     }
 
     /// Leave the group/channel. Returns true when the caller should dismiss.
@@ -316,4 +376,8 @@ extension Notification.Name {
     /// list changes. `object` is the `JoinRequest` for arrivals, nil for
     /// list changes (approve/decline).
     static let aegisJoinRequest = Notification.Name("aegis.joinRequest")
+    /// Posted when the message-requests inbox changes (new request,
+    /// accept, block). `object` is nil; observers re-read
+    /// `AppState.messageRequests`.
+    static let aegisMessageRequests = Notification.Name("aegis.messageRequests")
 }

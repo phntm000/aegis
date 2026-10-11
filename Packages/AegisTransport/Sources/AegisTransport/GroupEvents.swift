@@ -22,6 +22,10 @@ public enum GroupEventKind: Sendable, Equatable {
     case roleChanged(fingerprint: Data, role: String)
     case topicChanged(String?)
     case announcementModeChanged(Bool)
+    /// Slow-mode interval changed (nil = off).
+    case slowModeChanged(TimeInterval?)
+    /// The channel's permission matrix changed.
+    case permissionsChanged
 }
 
 /// A verified group membership event, addressed by routing mailbox.

@@ -54,6 +54,10 @@ final class CallsViewModel: ObservableObject {
 final class ActiveCallViewModel: ObservableObject {
     @Published var screenShareError: String?
     @Published private(set) var elapsed: TimeInterval = 0
+    /// Shown when the user taps "Redact" while screen sharing.
+    @Published var showingRedactSheet = false
+    /// Shown when the user picks full-device sharing (system picker).
+    @Published var showingBroadcastPicker = false
 
     private let appState: AppState
     private var ticker: Timer?
@@ -117,10 +121,82 @@ final class ActiveCallViewModel: ObservableObject {
             if call.isScreenSharing {
                 try await appState.transport.stopScreenShare(callID: call.id)
                 appState.activeCall?.isScreenSharing = false
+                appState.activeCall?.isScreenSharePaused = false
+            } else if call.isBroadcastSharing {
+                try await appState.transport.stopBroadcastShare(callID: call.id)
+                appState.activeCall?.isBroadcastSharing = false
             } else {
                 try await appState.transport.startScreenShare(callID: call.id)
                 appState.activeCall?.isScreenSharing = true
             }
+            Haptics.selection()
+        } catch {
+            screenShareError = error.localizedDescription
+            Haptics.notification(.error)
+        }
+    }
+
+    /// Pauses/resumes in-app screen-share capture (the peer sees a frozen
+    /// frame while paused; resume needs no renegotiation).
+    func toggleScreenSharePaused() async {
+        guard let call, call.isScreenSharing else { return }
+        let paused = !call.isScreenSharePaused
+        do {
+            try await appState.transport.setScreenSharePaused(paused, callID: call.id)
+            appState.activeCall?.isScreenSharePaused = paused
+            Haptics.selection()
+        } catch {
+            screenShareError = error.localizedDescription
+            Haptics.notification(.error)
+        }
+    }
+
+    /// Applies on-device redaction regions for screen sharing (normalized
+    /// unit coordinates). Redacted pixels never leave the device.
+    func applyRedactionRegions(_ regions: [CGRect]) async {
+        guard let call, call.isScreenSharing else { return }
+        do {
+            try await appState.transport.setScreenShareRedactionRegions(regions, callID: call.id)
+            appState.activeCall?.screenShareRedactions = regions
+            Haptics.selection()
+        } catch {
+            screenShareError = error.localizedDescription
+            Haptics.notification(.error)
+        }
+    }
+
+    var broadcastShareSupported: Bool {
+        appState.transport.broadcastShareSupported
+    }
+
+    /// Starts full-device sharing via the ReplayKit Broadcast Upload
+    /// Extension. The user picks Aegis in the system broadcast picker; the
+    /// extension's frames take over the call's video track once they arrive.
+    func startBroadcastShare() async {
+        guard let call else { return }
+        screenShareError = nil
+        guard broadcastShareSupported else {
+            screenShareError = "Full-screen sharing needs the Aegis broadcast extension, which isn't installed with this build."
+            return
+        }
+        do {
+            try await appState.transport.startBroadcastShare(callID: call.id)
+            // The extension only starts after the user confirms in the
+            // system picker; the UI flips to sharing on the first frame.
+            // Mark it now so the controls reflect the armed state.
+            appState.activeCall?.isBroadcastSharing = true
+            Haptics.selection()
+        } catch {
+            screenShareError = error.localizedDescription
+            Haptics.notification(.error)
+        }
+    }
+
+    func stopBroadcastShare() async {
+        guard let call, call.isBroadcastSharing else { return }
+        do {
+            try await appState.transport.stopBroadcastShare(callID: call.id)
+            appState.activeCall?.isBroadcastSharing = false
             Haptics.selection()
         } catch {
             screenShareError = error.localizedDescription

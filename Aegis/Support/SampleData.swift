@@ -164,6 +164,61 @@ enum SampleData {
         )
         dmMaya.unreadCount = 2
 
+        // MARK: Messages — richness examples (poll, thread, star, pin)
+
+        let pollMessage = Message(
+            conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
+            status: .read,
+            poll: PollMessage(
+                question: "Dinner Thursday — where to?",
+                options: ["Steve's Burgers", "Luigi's Pizza", "Taco truck"],
+                allowsMultipleChoice: false,
+                isAnonymous: false,
+                closesAt: now.addingTimeInterval(20 * 3600),
+                tally: [0: 1, 1: 1],
+                voters: [maya.id, identity.id],
+                voterChoices: [maya.id: [0], identity.id: [1]],
+                myChoices: [1],
+                eligibleVoterCount: nil
+            ),
+            sentAt: now.addingTimeInterval(-2000)
+        )
+        let threadParent = Message(
+            conversationID: dmMaya.id, senderID: identity.id, isFromMe: true,
+            body: "Flight's booked — landing 6:40 PM Thursday.",
+            quoteSnapshot: m4.makeQuoteSnapshot(senderName: "Maya Chen"),
+            status: .read,
+            sentAt: now.addingTimeInterval(-2400)
+        )
+        let threadReply1 = Message(
+            conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
+            body: "I'll pick you up from arrivals.",
+            threadRootID: threadParent.id,
+            status: .read,
+            sentAt: now.addingTimeInterval(-2300)
+        )
+        let threadReply2 = Message(
+            conversationID: dmMaya.id, senderID: identity.id, isFromMe: true,
+            body: "Terminal B, see you there!",
+            threadRootID: threadParent.id,
+            status: .read,
+            sentAt: now.addingTimeInterval(-2200)
+        )
+        let starredMessage = Message(
+            conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
+            body: "Gate code for Thursday: 4410",
+            status: .read,
+            isStarred: true,
+            sentAt: now.addingTimeInterval(-2600)
+        )
+        let pinnedMessage = Message(
+            conversationID: dmMaya.id, senderID: maya.id, isFromMe: false,
+            body: "House rules doc: no screenshots of the designs.",
+            status: .read,
+            pin: MessagePin(pinnedBy: maya.id, pinnedByName: "Maya Chen", pinnedAt: now.addingTimeInterval(-2800)),
+            sentAt: now.addingTimeInterval(-2900)
+        )
+
         // MARK: Messages — Design sync group
 
         let g1 = Message(
@@ -211,7 +266,7 @@ enum SampleData {
         )
 
         let messages: [UUID: [Message]] = [
-            dmMaya.id: [m1, m2, m3, m4, m5, m6, voice],
+            dmMaya.id: [m1, m2, m3, m4, m5, m6, voice, pollMessage, threadParent, threadReply2, threadReply1, starredMessage, pinnedMessage],
             groupDesign.id: [g1, g2, g3],
             channelAnnounce.id: [c1],
             dmSam.id: [s1],

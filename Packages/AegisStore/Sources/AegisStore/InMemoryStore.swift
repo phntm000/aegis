@@ -285,6 +285,8 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
         m.tombstonedAt = at
         m.text = nil
         m.poll = nil
+        m.pin = nil
+        m.isStarred = false
         m.attachmentIDs = []
         m.updatedAt = at
         messagesByID[id] = m
@@ -315,6 +317,12 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
                 .lowercased().contains(q)
         }
         return hits.sorted { $0.createdAt > $1.createdAt }.prefix(limit).map { $0 }
+    }
+
+    public func disappearedMessages(now: Date) async throws -> [Message] {
+        messagesByID.values.filter {
+            !$0.isTombstone && ($0.disappearAt.map { $0 <= now } ?? false)
+        }
     }
 
     public func expungeDisappeared(now: Date) async throws -> Int {
@@ -379,6 +387,45 @@ public actor InMemoryAegisStore: AegisDatabase, ConversationRepository, MessageR
         }
         m.updatedAt = Date()
         messagesByID[id] = m
+    }
+
+    public func listReplies(
+        in conversationID: ConversationID,
+        threadRootID: MessageID
+    ) async throws -> [Message] {
+        messagesByID.values
+            .filter { $0.conversationID == conversationID && $0.threadRootID == threadRootID }
+            .sorted {
+                if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+                return $0.id.rawValue < $1.id.rawValue
+            }
+    }
+
+    public func threadSummaries(
+        in conversationID: ConversationID
+    ) async throws -> [MessageID: ThreadSummary] {
+        var out: [MessageID: ThreadSummary] = [:]
+        for m in messagesByID.values where m.conversationID == conversationID {
+            guard let root = m.threadRootID else { continue }
+            let activity = m.sentAt ?? m.createdAt
+            if var existing = out[root] {
+                existing.replyCount += 1
+                existing.lastActivityAt = max(existing.lastActivityAt, activity)
+                out[root] = existing
+            } else {
+                out[root] = ThreadSummary(replyCount: 1, lastActivityAt: activity)
+            }
+        }
+        return out
+    }
+
+    public func starredMessages(
+        in conversationID: ConversationID?
+    ) async throws -> [Message] {
+        messagesByID.values
+            .filter { $0.isStarred && !$0.isTombstone }
+            .filter { conversationID == nil || $0.conversationID == conversationID }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     // MARK: - ContactRepository

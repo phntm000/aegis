@@ -159,6 +159,7 @@ enum StoreMapping {
         pkg.id = packageID(app.id)
         pkg.title = app.title
         pkg.disappearingTimerSeconds = app.disappearingInterval.map { Int($0) }
+        pkg.disappearingAfterRead = app.disappearingAfterRead
         pkg.isArchived = app.isArchived
         pkg.isMuted = app.isMuted
         pkg.isPinned = app.isPinned
@@ -187,6 +188,7 @@ enum StoreMapping {
             isArchived: pkg.isArchived,
             unreadCount: pkg.unreadCount,
             disappearingInterval: pkg.disappearingTimerSeconds.map { TimeInterval($0) },
+            disappearingAfterRead: pkg.disappearingAfterRead,
             readReceiptsEnabled: pkg.readReceiptsEnabled,
             typingIndicatorsEnabled: pkg.typingIndicatorsEnabled,
             isAnnouncementOnly: sidecar.isAnnouncementOnly,
@@ -200,12 +202,22 @@ enum StoreMapping {
 
     // MARK: Message
 
+    /// Maps an app UUID to a package UserID, using the "local" sentinel
+    /// for the local user (stable across identity rotations).
+    static func packageUserID(_ uuid: UUID, localUserID: UUID) -> AegisStore.UserID {
+        uuid == localUserID ? "local" : AegisStore.UserID(uuid.uuidString)
+    }
+
+    static func appUserUUID(_ id: AegisStore.UserID, localUserID: UUID) -> UUID {
+        id.rawValue == "local" ? localUserID : (UUID(uuidString: id.rawValue) ?? UUID())
+    }
+
     static func toPackage(_ app: Message, localUserID: UUID) -> AegisStore.Message {
         let reactions: [AegisStore.Reaction] = app.reactions.flatMap { emoji, uuids in
             uuids.map { uuid in
                 AegisStore.Reaction(
                     emoji: emoji,
-                    userID: uuid == localUserID ? "local" : AegisStore.UserID(uuid.uuidString),
+                    userID: packageUserID(uuid, localUserID: localUserID),
                     reactedAt: Date()
                 )
             }
@@ -213,23 +225,118 @@ enum StoreMapping {
         var attachmentIDs: [AegisStore.AttachmentID] = []
         if app.attachment != nil { attachmentIDs.append(packageID(app.id)) }
         if app.voiceNote != nil { attachmentIDs.append(packageID(app.id)) }
+        let kind: AegisStore.MessageKind
+        if app.poll != nil { kind = .poll }
+        else if app.attachment != nil { kind = .attachment }
+        else if app.voiceNote != nil { kind = .voiceNote }
+        else { kind = .text }
         return AegisStore.Message(
             id: packageID(app.id),
             conversationID: packageID(app.conversationID),
             senderID: app.isFromMe ? "local" : AegisStore.UserID(app.senderID.uuidString),
             direction: app.isFromMe ? .outgoing : .incoming,
-            kind: app.attachment != nil ? .attachment : (app.voiceNote != nil ? .voiceNote : .text),
+            kind: kind,
             text: app.body,
             replyToMessageID: app.replyToID.map { packageID($0) },
-            editVersion: app.editedAt == nil ? 0 : 1,
+            quoteSnapshot: app.quoteSnapshot.map { quoteToPackage($0, localUserID: localUserID) },
+            threadRootID: app.threadRootID.map { packageID($0) },
+            editVersion: app.editHistory.count,
             editedAt: app.editedAt,
+            editHistory: app.editHistory.map {
+                AegisStore.MessageEditRecord(body: $0.body, editedAt: $0.editedAt)
+            },
             isTombstone: app.deletedAt != nil,
             tombstonedAt: app.deletedAt,
             disappearAt: app.expiresAt,
             deliveryState: deliveryState(from: app.status),
             sentAt: app.sentAt,
             reactions: reactions,
+            poll: app.poll.map { pollToPackage($0, localUserID: localUserID) },
+            isStarred: app.isStarred,
+            pin: app.pin.map { pinToPackage($0, localUserID: localUserID) },
             attachmentIDs: attachmentIDs
+        )
+    }
+
+    static func quoteToPackage(_ app: QuoteSnapshot, localUserID: UUID) -> AegisStore.QuoteSnapshot {
+        AegisStore.QuoteSnapshot(
+            senderID: packageUserID(app.senderID, localUserID: localUserID),
+            senderName: app.senderName,
+            bodyExcerpt: app.bodyExcerpt,
+            hasAttachment: app.hasAttachment,
+            hasVoiceNote: app.hasVoiceNote,
+            isPoll: app.isPoll,
+            sentAt: app.sentAt,
+            expiresAt: app.expiresAt
+        )
+    }
+
+    static func quoteToApp(_ pkg: AegisStore.QuoteSnapshot, localUserID: UUID) -> QuoteSnapshot {
+        QuoteSnapshot(
+            senderID: pkg.senderID.map { appUserUUID($0, localUserID: localUserID) } ?? localUserID,
+            senderName: pkg.senderName,
+            bodyExcerpt: pkg.bodyExcerpt,
+            hasAttachment: pkg.hasAttachment,
+            hasVoiceNote: pkg.hasVoiceNote,
+            isPoll: pkg.isPoll,
+            sentAt: pkg.sentAt ?? Date(),
+            expiresAt: pkg.expiresAt
+        )
+    }
+
+    static func pollToPackage(_ app: PollMessage, localUserID: UUID) -> AegisStore.Poll {
+        AegisStore.Poll(
+            question: app.question,
+            options: app.options.map { AegisStore.PollOption($0) },
+            allowsMultipleChoice: app.allowsMultipleChoice,
+            isAnonymous: app.isAnonymous,
+            closesAt: app.closesAt,
+            tally: app.tally,
+            voters: Set(app.voters.map { packageUserID($0, localUserID: localUserID) }),
+            voterChoices: Dictionary(
+                uniqueKeysWithValues: app.voterChoices.map { key, value in
+                    (packageUserID(key, localUserID: localUserID), value)
+                }
+            ),
+            myChoices: app.myChoices,
+            eligibleVoterCount: app.eligibleVoterCount
+        )
+    }
+
+    static func pollToApp(_ pkg: AegisStore.Poll, localUserID: UUID) -> PollMessage {
+        PollMessage(
+            question: pkg.question,
+            options: pkg.options.map(\.text),
+            allowsMultipleChoice: pkg.allowsMultipleChoice,
+            isAnonymous: pkg.isAnonymous,
+            closesAt: pkg.closesAt,
+            tally: pkg.tally,
+            voters: pkg.voters.map { appUserUUID($0, localUserID: localUserID) },
+            voterChoices: Dictionary(
+                uniqueKeysWithValues: pkg.voterChoices.map { key, value in
+                    (appUserUUID(key, localUserID: localUserID), value)
+                }
+            ),
+            myChoices: pkg.myChoices,
+            eligibleVoterCount: pkg.eligibleVoterCount
+        )
+    }
+
+    static func pinToPackage(_ app: MessagePin, localUserID: UUID) -> AegisStore.MessagePin {
+        AegisStore.MessagePin(
+            pinnedBy: packageUserID(app.pinnedBy, localUserID: localUserID),
+            pinnedByName: app.pinnedByName,
+            pinnedAt: app.pinnedAt,
+            expiresAt: app.expiresAt
+        )
+    }
+
+    static func pinToApp(_ pkg: AegisStore.MessagePin, localUserID: UUID) -> MessagePin {
+        MessagePin(
+            pinnedBy: appUserUUID(pkg.pinnedBy, localUserID: localUserID),
+            pinnedByName: pkg.pinnedByName,
+            pinnedAt: pkg.pinnedAt,
+            expiresAt: pkg.expiresAt
         )
     }
 
@@ -242,9 +349,7 @@ enum StoreMapping {
         let isFromMe = pkg.direction == .outgoing
         var reactions: [String: [UUID]] = [:]
         for reaction in pkg.reactions {
-            let uuid: UUID = reaction.userID.rawValue == "local"
-                ? localUserID
-                : (UUID(uuidString: reaction.userID.rawValue) ?? UUID())
+            let uuid: UUID = appUserUUID(reaction.userID, localUserID: localUserID)
             reactions[reaction.emoji, default: []].append(uuid)
         }
         return Message(
@@ -254,11 +359,17 @@ enum StoreMapping {
             isFromMe: isFromMe,
             body: pkg.isTombstone ? nil : pkg.text,
             replyToID: pkg.replyToMessageID.map { appUUID($0) },
+            quoteSnapshot: pkg.quoteSnapshot.map { quoteToApp($0, localUserID: localUserID) },
             reactions: reactions,
             status: messageStatus(from: pkg.deliveryState),
             editedAt: pkg.editedAt,
+            editHistory: pkg.editHistory.map { MessageEdit(body: $0.body, editedAt: $0.editedAt) },
             deletedAt: pkg.tombstonedAt,
             expiresAt: pkg.disappearAt,
+            threadRootID: pkg.threadRootID.map { appUUID($0) },
+            poll: pkg.isTombstone ? nil : pkg.poll.map { pollToApp($0, localUserID: localUserID) },
+            isStarred: pkg.isStarred,
+            pin: pkg.pin.map { pinToApp($0, localUserID: localUserID) },
             attachment: attachment,
             voiceNote: voiceNote,
             sentAt: pkg.sentAt ?? Date()
@@ -425,15 +536,19 @@ enum StoreMapping {
         switch app {
         case .owner: return .owner
         case .admin: return .admin
+        case .moderator: return .moderator
         case .member: return .member
+        case .guest: return .guest
         }
     }
 
     static func memberRole(from pkg: AegisStore.MemberRole) -> MemberRole {
         switch pkg {
         case .owner: return .owner
-        case .admin, .moderator: return .admin
-        case .member, .guest: return .member
+        case .admin: return .admin
+        case .moderator: return .moderator
+        case .member: return .member
+        case .guest: return .guest
         }
     }
 }

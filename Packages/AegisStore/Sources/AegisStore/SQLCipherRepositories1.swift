@@ -14,11 +14,12 @@ extension SQLCipherAegisStore {
             """
             INSERT INTO conversation(
               id, kind, network_policy, title, key_epoch,
-              disappearing_timer_seconds, is_archived, is_muted, is_pinned,
+              disappearing_timer_seconds, disappearing_after_read,
+              is_archived, is_muted, is_pinned,
               read_receipts, typing_indicators, link_previews,
               last_read_message_id, unread_count, last_message_id,
               created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
             """,
             conversationArgs(c)
         )
@@ -32,6 +33,7 @@ extension SQLCipherAegisStore {
             c.title.map(SQLValue.text) ?? .null,
             .int(Int64(c.keyEpoch)),
             c.disappearingTimerSeconds.map { SQLValue.int(Int64($0)) } ?? .null,
+            sqlBool(c.disappearingAfterRead),
             sqlBool(c.isArchived),
             sqlBool(c.isMuted),
             sqlBool(c.isPinned),
@@ -54,6 +56,7 @@ extension SQLCipherAegisStore {
             title: r.string("title"),
             keyEpoch: Int(r.int("key_epoch") ?? 0),
             disappearingTimerSeconds: r.int("disappearing_timer_seconds").map(Int.init),
+            disappearingAfterRead: r.bool("disappearing_after_read"),
             isArchived: r.bool("is_archived"),
             isMuted: r.bool("is_muted"),
             isPinned: r.bool("is_pinned"),
@@ -123,7 +126,8 @@ extension SQLCipherAegisStore {
             """
             UPDATE conversation SET
               kind = ?, network_policy = ?, title = ?, key_epoch = ?,
-              disappearing_timer_seconds = ?, is_archived = ?, is_muted = ?,
+              disappearing_timer_seconds = ?, disappearing_after_read = ?,
+              is_archived = ?, is_muted = ?,
               is_pinned = ?, read_receipts = ?, typing_indicators = ?,
               link_previews = ?, last_read_message_id = ?, unread_count = ?,
               last_message_id = ?, created_at = ?, updated_at = ?
@@ -200,12 +204,14 @@ extension SQLCipherAegisStore {
             """
             INSERT INTO message(
               id, conversation_id, sender_id, is_sealed_sender, direction,
-              kind, text, reply_to, thread_root, edit_version, edited_at,
+              kind, text, reply_to, quote_snapshot_json, thread_root,
+              edit_version, edited_at, edit_history_json,
               is_tombstone, tombstoned_at, disappear_at, scheduled_for,
               delivery_state, sent_at, delivered_at, read_at, secrecy_epoch,
-              reactions_json, poll_json, attachment_ids_json,
+              reactions_json, poll_json, is_starred, pin_json,
+              attachment_ids_json,
               created_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);
             """,
             messageArgs(m)
         )
@@ -238,9 +244,11 @@ extension SQLCipherAegisStore {
             .text(m.kind.rawValue),
             m.text.map(SQLValue.text) ?? .null,
             m.replyToMessageID.map { SQLValue.text($0.rawValue) } ?? .null,
+            try m.quoteSnapshot.map { try encodeJSON($0) } ?? .null,
             m.threadRootID.map { SQLValue.text($0.rawValue) } ?? .null,
             .int(Int64(m.editVersion)),
             sqlDate(m.editedAt),
+            try encodeJSON(m.editHistory),
             sqlBool(m.isTombstone),
             sqlDate(m.tombstonedAt),
             sqlDate(m.disappearAt),
@@ -252,6 +260,8 @@ extension SQLCipherAegisStore {
             .int(Int64(m.secrecyEpoch)),
             try encodeJSON(m.reactions),
             try m.poll.map { try encodeJSON($0) } ?? .null,
+            sqlBool(m.isStarred),
+            try m.pin.map { try encodeJSON($0) } ?? .null,
             try encodeJSON(m.attachmentIDs),
             sqlDate(m.createdAt),
             sqlDate(m.updatedAt),
@@ -268,9 +278,11 @@ extension SQLCipherAegisStore {
             kind: MessageKind(rawValue: try r.reqString("kind")) ?? .text,
             text: r.string("text"),
             replyToMessageID: r.string("reply_to").map { MessageID($0) },
+            quoteSnapshot: try decodeJSON(r.string("quote_snapshot_json"), fallback: QuoteSnapshot?.none),
             threadRootID: r.string("thread_root").map { MessageID($0) },
             editVersion: Int(r.int("edit_version") ?? 0),
             editedAt: r.date("edited_at"),
+            editHistory: try decodeJSON(r.string("edit_history_json"), fallback: [MessageEditRecord]()),
             isTombstone: r.bool("is_tombstone"),
             tombstonedAt: r.date("tombstoned_at"),
             disappearAt: r.date("disappear_at"),
@@ -282,6 +294,8 @@ extension SQLCipherAegisStore {
             secrecyEpoch: Int(r.int("secrecy_epoch") ?? 0),
             reactions: try decodeJSON(r.string("reactions_json"), fallback: [Reaction]()),
             poll: try decodeJSON(r.string("poll_json"), fallback: Poll?.none),
+            isStarred: r.bool("is_starred"),
+            pin: try decodeJSON(r.string("pin_json"), fallback: MessagePin?.none),
             attachmentIDs: try decodeJSON(r.string("attachment_ids_json"), fallback: [AttachmentID]()),
             createdAt: try r.reqDate("created_at"),
             updatedAt: try r.reqDate("updated_at")
@@ -357,11 +371,13 @@ extension SQLCipherAegisStore {
             UPDATE message SET
               conversation_id = ?, sender_id = ?, is_sealed_sender = ?,
               direction = ?, kind = ?, text = ?, reply_to = ?,
-              thread_root = ?, edit_version = ?, edited_at = ?,
+              quote_snapshot_json = ?, thread_root = ?, edit_version = ?,
+              edited_at = ?, edit_history_json = ?,
               is_tombstone = ?, tombstoned_at = ?, disappear_at = ?,
               scheduled_for = ?, delivery_state = ?, sent_at = ?,
               delivered_at = ?, read_at = ?, secrecy_epoch = ?,
-              reactions_json = ?, poll_json = ?, attachment_ids_json = ?,
+              reactions_json = ?, poll_json = ?, is_starred = ?,
+              pin_json = ?, attachment_ids_json = ?,
               created_at = ?, updated_at = ?
             WHERE id = ?;
             """,
@@ -381,11 +397,71 @@ extension SQLCipherAegisStore {
             """
             UPDATE message SET
               is_tombstone = 1, tombstoned_at = ?, text = NULL,
-              poll_json = NULL, attachment_ids_json = '[]', updated_at = ?
+              poll_json = NULL, pin_json = NULL, is_starred = 0,
+              attachment_ids_json = '[]', updated_at = ?
             WHERE id = ?;
             """,
             [sqlDate(at), sqlDate(at), .text(id.rawValue)]
         )
+    }
+
+    public func listReplies(
+        in conversationID: ConversationID,
+        threadRootID: MessageID
+    ) async throws -> [Message] {
+        let rows = try conn.query(
+            """
+            SELECT * FROM message
+            WHERE conversation_id = ? AND thread_root = ?
+            ORDER BY created_at ASC, id ASC;
+            """,
+            [.text(conversationID.rawValue), .text(threadRootID.rawValue)]
+        )
+        return try rows.map { try decodeMessage($0) }
+    }
+
+    public func threadSummaries(
+        in conversationID: ConversationID
+    ) async throws -> [MessageID: ThreadSummary] {
+        let rows = try conn.query(
+            """
+            SELECT thread_root, COUNT(*) AS reply_count,
+                   MAX(created_at) AS last_activity
+            FROM message
+            WHERE conversation_id = ? AND thread_root IS NOT NULL
+            GROUP BY thread_root;
+            """,
+            [.text(conversationID.rawValue)]
+        )
+        var out: [MessageID: ThreadSummary] = [:]
+        for row in rows {
+            guard let root = row.string("thread_root"),
+                  let count = row.int("reply_count"),
+                  let lastActivity = row.date("last_activity")
+            else { continue }
+            out[MessageID(root)] = ThreadSummary(
+                replyCount: Int(count),
+                lastActivityAt: lastActivity
+            )
+        }
+        return out
+    }
+
+    public func starredMessages(
+        in conversationID: ConversationID?
+    ) async throws -> [Message] {
+        var sql = """
+            SELECT * FROM message
+            WHERE is_starred = 1 AND is_tombstone = 0
+            """
+        var args: [SQLValue] = []
+        if let conversationID {
+            sql += " AND conversation_id = ?"
+            args.append(.text(conversationID.rawValue))
+        }
+        sql += " ORDER BY created_at DESC, id DESC;"
+        let rows = try conn.query(sql, args)
+        return try rows.map { try decodeMessage($0) }
     }
 
     public func search(
@@ -420,6 +496,18 @@ extension SQLCipherAegisStore {
             }
             throw e
         }
+    }
+
+    public func disappearedMessages(now: Date) async throws -> [Message] {
+        let rows = try conn.query(
+            """
+            SELECT * FROM message
+            WHERE is_tombstone = 0 AND disappear_at IS NOT NULL
+              AND disappear_at <= ?;
+            """,
+            [sqlDate(now)]
+        )
+        return try rows.map { try decodeMessage($0) }
     }
 
     public func expungeDisappeared(now: Date) async throws -> Int {

@@ -427,6 +427,66 @@ final class AegisStoreTests: XCTestCase {
         XCTAssertEqual(history.first?.durationSeconds, 125)
     }
 
+    // MARK: - Messaging richness
+
+    func testThreadRepliesOldestFirst() async throws {
+        let c = try await makeConversation()
+        let parent = try await makeMessage(in: c.id, text: "parent")
+        let r1 = Message(
+            conversationID: c.id, direction: .incoming, text: "one",
+            threadRootID: parent.id
+        )
+        let r2 = Message(
+            conversationID: c.id, direction: .outgoing, text: "two",
+            threadRootID: parent.id
+        )
+        try await store.messages.insert(r1)
+        try await store.messages.insert(r2)
+        let replies = try await store.messages.listReplies(in: c.id, threadRootID: parent.id)
+        XCTAssertEqual(replies.count, 2)
+        XCTAssertEqual(replies.first?.threadRootID, parent.id)
+        let summaries = try await store.messages.threadSummaries(in: c.id)
+        XCTAssertEqual(summaries[parent.id]?.replyCount, 2)
+    }
+
+    func testStarredMessagesExcludeTombstones() async throws {
+        let c = try await makeConversation()
+        var m = Message(conversationID: c.id, direction: .incoming, text: "star me", isStarred: true)
+        try await store.messages.insert(m)
+        var starred = try await store.messages.starredMessages(in: c.id)
+        XCTAssertEqual(starred.count, 1)
+        try await store.messages.applyTombstone(id: m.id, at: Date())
+        starred = try await store.messages.starredMessages(in: c.id)
+        XCTAssertTrue(starred.isEmpty, "tombstoned messages lose their star")
+        m = try await store.messages.fetch(id: m.id)!
+        XCTAssertFalse(m.isStarred)
+        XCTAssertNil(m.pin)
+    }
+
+    func testDisappearedMessagesListedBeforeExpunge() async throws {
+        let c = try await makeConversation()
+        let doomed = Message(
+            conversationID: c.id, direction: .incoming, text: "burn",
+            disappearAt: Date().addingTimeInterval(-5)
+        )
+        try await store.messages.insert(doomed)
+        let listed = try await store.messages.disappearedMessages(now: Date())
+        XCTAssertEqual(listed.map(\.id), [doomed.id])
+    }
+
+    func testQuoteAndPinPersist() async throws {
+        let c = try await makeConversation()
+        let m = Message(
+            conversationID: c.id, direction: .incoming, text: "hi",
+            quoteSnapshot: QuoteSnapshot(senderName: "Maya", bodyExcerpt: "yo"),
+            pin: MessagePin(pinnedBy: UserID("x"), pinnedByName: "Maya")
+        )
+        try await store.messages.insert(m)
+        let fetched = try await store.messages.fetch(id: m.id)!
+        XCTAssertEqual(fetched.quoteSnapshot?.bodyExcerpt, "yo")
+        XCTAssertEqual(fetched.pin?.pinnedByName, "Maya")
+    }
+
     // MARK: - Transactions
 
     func testTransactionGroupsWrites() async throws {

@@ -56,7 +56,9 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    settingsRow(icon: "message.fill", title: "Messaging", color: Color.blue, destination: AnyView(MessagingSettingsView()))
                     settingsRow(icon: "lock.shield.fill", title: "Privacy", color: AegisColors.accent, destination: AnyView(PrivacySettingsView()))
+                    settingsRow(icon: "person.slash.fill", title: "Blocked", color: AegisColors.danger, destination: AnyView(BlockedContactsView().environmentObject(appState)))
                     settingsRow(icon: "paintbrush.fill", title: "Appearance", color: AegisColors.purple, destination: AnyView(AppearanceSettingsView()))
                     settingsRow(icon: "bell.badge.fill", title: "Notifications", color: AegisColors.danger, destination: AnyView(NotificationsSettingsView(appState: appState)))
                     settingsRow(icon: "faceid", title: "App lock", color: AegisColors.success, destination: AnyView(AppLockSettingsView()))

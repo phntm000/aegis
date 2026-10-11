@@ -59,6 +59,14 @@ protocol CryptoService: Sendable {
     /// sent (encrypted) as a rotation hint so contacts can link the new key.
     func supersededIdentityFingerprint() async -> Data?
 
+    // MARK: Identity signatures
+
+    /// Signs `data` with the long-term Ed25519 identity key. Used for
+    /// signed message events (reactions, edits, tombstones, ballots,
+    /// pins). The private key never crosses this protocol — only the
+    /// 64-byte signature comes back.
+    func signWithIdentity(_ data: Data) async throws -> Data
+
     // MARK: Session encryption
 
     /// Encrypt a plaintext message body for a conversation. Handles DM
@@ -125,4 +133,15 @@ protocol CryptoService: Sendable {
 extension CryptoService {
     /// Default: persistence not configured (previews/mocks).
     func flushSessions() async {}
+
+    /// Default: previews/mocks have no identity key to sign with.
+    func signWithIdentity(_ data: Data) async throws -> Data {
+        throw CryptoServiceError.noIdentity
+    }
+}
+
+/// Errors from the CryptoService protocol surface.
+enum CryptoServiceError: Error, Sendable {
+    /// No identity exists to sign with (previews, logged-out state).
+    case noIdentity
 }

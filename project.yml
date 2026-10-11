@@ -29,8 +29,12 @@ packages:
     path: Packages/AegisStore
   WebRTCBridge:
     path: Packages/WebRTCBridge
+  # Added by the multidevice-v2 stream (merged from main): linked-device
+  # blob transfer package. Kept here so this branch doesn't revert it.
   AegisDeviceLink:
     path: Packages/AegisDeviceLink
+  AegisModeration:
+    path: Packages/AegisModeration
 
 targets:
   Aegis:
@@ -42,8 +46,12 @@ targets:
         excludes:
           - "INTEGRATION_NOTES.md"
           - "Info.plist"
+          - "*.entitlements"
           - "**/*.md"
+    entitlements:
+      path: Aegis/Aegis.entitlements
     dependencies:
+      - target: AegisBroadcastUpload
       - package: AegisCrypto
         products:
           - AegisCrypto
@@ -53,12 +61,16 @@ targets:
       - package: AegisStore
         products:
           - AegisStore
+      # Merged from main (multidevice-v2 stream); do not drop.
       - package: AegisDeviceLink
         products:
           - AegisDeviceLink
       - package: WebRTCBridge
         products:
           - WebRTCBridge
+      - package: AegisModeration
+        products:
+          - AegisModeration
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios
@@ -73,6 +85,36 @@ targets:
         ENABLE_APP_TRANSPORT_SECURITY: YES
     info:
       path: Aegis/Info.plist
+
+  # Broadcast Upload Extension for full-device screen sharing in calls.
+  # The extension captures the whole screen (in-app code can't) and hands
+  # JPEG frames to the app through the shared App Group container; the app
+  # feeds them into the call's existing video track (see
+  # Aegis/Media/BroadcastShare.swift). XcodeGen embeds the .appex in the
+  # app's PlugIns directory via the target dependency above.
+  AegisBroadcastUpload:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: AegisBroadcastUpload
+        excludes:
+          - "Info.plist"
+          - "*.entitlements"
+          - "**/*.md"
+    info:
+      path: AegisBroadcastUpload/Info.plist
+    entitlements:
+      path: AegisBroadcastUpload/AegisBroadcastUpload.entitlements
+    dependencies: []
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.BroadcastUpload
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: "" # <-- set your Apple team id for device builds
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
 
   # Unit tests for app-layer logic (crypto engine, adapters). Runs on the
   # iOS simulator in CI via `xcodebuild test`.
@@ -90,6 +132,9 @@ targets:
       - package: WebRTCBridge
         products:
           - WebRTCBridge
+      - package: AegisModeration
+        products:
+          - AegisModeration
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.tests

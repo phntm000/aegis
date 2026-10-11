@@ -59,6 +59,10 @@ struct ActiveCallView: View {
                             .background(AegisColors.surfaceElevated)
                             .clipShape(Capsule())
                     }
+
+                    if call.isScreenSharing || call.isBroadcastSharing {
+                        shareStatusBanner(for: call)
+                    }
                 } else {
                     ProgressView()
                         .tint(AegisColors.accent)
@@ -83,6 +87,14 @@ struct ActiveCallView: View {
         } message: {
             Text(viewModel.screenShareError ?? "")
         }
+        .sheet(isPresented: $viewModel.showingRedactSheet) {
+            ScreenShareRedactView(regions: viewModel.call?.screenShareRedactions ?? []) { regions in
+                Task { @MainActor in await viewModel.applyRedactionRegions(regions) }
+            }
+        }
+        .sheet(isPresented: $viewModel.showingBroadcastPicker) {
+            BroadcastPickerSheet(viewModel: viewModel)
+        }
         .onAppear {
             viewModel.startTicker()
         }
@@ -99,6 +111,31 @@ struct ActiveCallView: View {
         case .connected: return Formatters.callElapsed(viewModel.elapsed)
         case .ended: return "Ended"
         }
+    }
+
+    /// Live screen-share status: what is shared, whether paused, and how
+    /// many regions are redacted. View-only is by design — no remote
+    /// control exists.
+    private func shareStatusBanner(for call: ActiveCall) -> some View {
+        let text: String
+        if call.isBroadcastSharing {
+            text = "Sharing full screen"
+        } else if call.isScreenSharePaused {
+            text = "Screen share paused"
+        } else if call.screenShareRedactions.isEmpty {
+            text = "Sharing app screen"
+        } else {
+            let n = call.screenShareRedactions.count
+            text = "Sharing app screen · \(n) redacted region\(n == 1 ? "" : "s")"
+        }
+        return Label(text, systemImage: "rectangle.on.rectangle.fill")
+            .font(AegisType.caption)
+            .foregroundStyle(AegisColors.textSecondary)
+            .padding(.horizontal, AegisLayout.m)
+            .padding(.vertical, AegisLayout.xs)
+            .background(AegisColors.surfaceElevated)
+            .clipShape(Capsule())
+            .accessibilityLabel(text + ". View only. The other side cannot control your device.")
     }
 
     /// The SAS verification ceremony: both parties read the 4 characters

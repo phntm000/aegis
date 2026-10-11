@@ -5,16 +5,21 @@ import SwiftUI
 /// for owners/admins and are all wired to the transport.
 struct GroupDetailView: View {
     @StateObject private var viewModel: GroupDetailViewModel
+    @StateObject private var permissionsViewModel: ChannelPermissionsViewModel
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingInvite = false
     @State private var showingTopicEditor = false
     @State private var showingLeaveConfirm = false
+    @State private var showingRevokeInviteConfirm = false
     @State private var memberForActions: GroupMember?
+    @State private var memberForRemoval: GroupMember?
+    @State private var memberForOwnershipTransfer: GroupMember?
 
     init(conversation: Conversation, appState: AppState) {
         _viewModel = StateObject(wrappedValue: GroupDetailViewModel(conversation: conversation, appState: appState))
+        _permissionsViewModel = StateObject(wrappedValue: ChannelPermissionsViewModel(conversation: conversation, appState: appState))
     }
 
     var body: some View {
@@ -57,21 +62,77 @@ struct GroupDetailView: View {
             titleVisibility: .visible
         ) {
             if let member = memberForActions {
-                if member.role != .admin {
-                    Button("Make admin") {
-                        Task { @MainActor in await viewModel.setRole(member, role: .admin) }
+                // Role management: owners/admins only, and the transport
+                // enforces the hierarchy (you can't touch ranks at or above
+                // your own).
+                if viewModel.canModerate {
+                    if member.role != .admin {
+                        Button("Make admin") {
+                            Task { @MainActor in await viewModel.setRole(member, role: .admin) }
+                        }
+                    }
+                    if member.role != .moderator {
+                        Button("Make moderator") {
+                            Task { @MainActor in await viewModel.setRole(member, role: .moderator) }
+                        }
+                    }
+                    if member.role != .member {
+                        Button("Make member") {
+                            Task { @MainActor in await viewModel.setRole(member, role: .member) }
+                        }
+                    }
+                    if member.role != .guest {
+                        Button("Make guest (read-only)") {
+                            Task { @MainActor in await viewModel.setRole(member, role: .guest) }
+                        }
+                    }
+                    if viewModel.myRole == .owner {
+                        Button("Transfer ownership…", role: .destructive) {
+                            memberForOwnershipTransfer = member
+                        }
                     }
                 }
-                if member.role != .member {
-                    Button("Make member") {
-                        Task { @MainActor in await viewModel.setRole(member, role: .member) }
+                if viewModel.canManageMembers {
+                    Button("Remove from \(viewModel.isChannel ? "channel" : "group")", role: .destructive) {
+                        memberForRemoval = member
                     }
-                }
-                Button("Remove from group", role: .destructive) {
-                    Task { @MainActor in await viewModel.removeMember(member) }
                 }
                 Button("Cancel", role: .cancel) {}
             }
+        }
+        .confirmationDialog(
+            removeMemberTitle,
+            isPresented: Binding(
+                get: { memberForRemoval != nil },
+                set: { if !$0 { memberForRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let member = memberForRemoval {
+                    Task { @MainActor in await viewModel.removeMember(member) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They'll lose access immediately and won't be able to read new messages. This is a signed group event.")
+        }
+        .confirmationDialog(
+            "Transfer ownership?",
+            isPresented: Binding(
+                get: { memberForOwnershipTransfer != nil },
+                set: { if !$0 { memberForOwnershipTransfer = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Transfer ownership", role: .destructive) {
+                if let member = memberForOwnershipTransfer {
+                    Task { @MainActor in await viewModel.transferOwnership(to: member) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(memberForOwnershipTransfer?.displayName ?? "They") will become the owner, and you'll become an admin. This can't be undone by you afterwards.")
         }
         .confirmationDialog("Leave this \(viewModel.isChannel ? "channel" : "group")?",
                             isPresented: $showingLeaveConfirm, titleVisibility: .visible) {
@@ -84,10 +145,31 @@ struct GroupDetailView: View {
         } message: {
             Text("You'll stop receiving new messages. Your history on this device is removed.")
         }
+        .confirmationDialog("Revoke this invite?",
+                            isPresented: $showingRevokeInviteConfirm, titleVisibility: .visible) {
+            Button("Revoke invite", role: .destructive) {
+                Task { @MainActor in await viewModel.revokeInvite() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Already-issued invite codes and links will stop working immediately. You'll need to generate a new invite to add people.")
+        }
+        .alert("Couldn't complete that", isPresented: Binding(
+            get: { viewModel.error != nil },
+            set: { if !$0 { viewModel.error = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.error ?? "")
+        }
     }
 
     private var memberActionTitle: String {
         memberForActions.map { "Manage \($0.displayName)" } ?? ""
+    }
+
+    private var removeMemberTitle: String {
+        memberForRemoval.map { "Remove \($0.displayName)?" } ?? ""
     }
 
     // MARK: - Content
@@ -105,35 +187,63 @@ struct GroupDetailView: View {
                         Label("Invite via QR or link", systemImage: "qrcode")
                     }
                     .disabled(viewModel.isWorking)
+                    Button(role: .destructive) {
+                        showingRevokeInviteConfirm = true
+                    } label: {
+                        Label("Revoke invite", systemImage: "qrcode.viewfinder")
+                    }
+                    .disabled(viewModel.isWorking)
+                    .accessibilityHint("Already-issued invite codes stop working immediately")
+                } footer: {
+                    Text("Revoking invalidates every invite issued so far. New invites get a fresh code.")
                 }
 
-                if !viewModel.joinRequests.isEmpty {
-                    Section("Join requests (\(viewModel.joinRequests.count))") {
-                        ForEach(viewModel.joinRequests) { request in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(request.requesterName)
-                                        .font(AegisType.body)
-                                        .foregroundStyle(AegisColors.textPrimary)
-                                    Text("Wants to join this \(viewModel.isChannel ? "channel" : "group")")
-                                        .font(AegisType.caption)
-                                        .foregroundStyle(AegisColors.textSecondary)
-                                }
-                                Spacer()
-                                Button("Decline") {
-                                    viewModel.declineJoinRequest(request)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(AegisColors.textSecondary)
-                                Button("Approve") {
-                                    Task { @MainActor in await viewModel.approveJoinRequest(request) }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(AegisColors.accent)
-                                .disabled(viewModel.isWorking)
+                Section {
+                    NavigationLink {
+                        ChannelPermissionsView(viewModel: permissionsViewModel)
+                            .environmentObject(appState)
+                    } label: {
+                        Label("Permissions", systemImage: "key")
+                    }
+                    NavigationLink {
+                        AuditLogView(viewModel: permissionsViewModel)
+                            .environmentObject(appState)
+                    } label: {
+                        Label("Audit log", systemImage: "scroll")
+                    }
+                } header: {
+                    Text("Moderation")
+                } footer: {
+                    Text("Every change is a signed group event, replicated to members and recorded in the hash-chained audit log.")
+                }
+            }
+
+            if viewModel.canManageMembers, !viewModel.joinRequests.isEmpty {
+                Section("Join requests (\(viewModel.joinRequests.count))") {
+                    ForEach(viewModel.joinRequests) { request in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(request.requesterName)
+                                    .font(AegisType.body)
+                                    .foregroundStyle(AegisColors.textPrimary)
+                                Text("Wants to join this \(viewModel.isChannel ? "channel" : "group")")
+                                    .font(AegisType.caption)
+                                    .foregroundStyle(AegisColors.textSecondary)
                             }
-                            .padding(.vertical, 4)
+                            Spacer()
+                            Button("Decline") {
+                                viewModel.declineJoinRequest(request)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(AegisColors.textSecondary)
+                            Button("Approve") {
+                                Task { @MainActor in await viewModel.approveJoinRequest(request) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(AegisColors.accent)
+                            .disabled(viewModel.isWorking)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
             }
@@ -143,7 +253,7 @@ struct GroupDetailView: View {
                     MemberRowView(member: member, isSelf: isSelf(member))
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            guard viewModel.canModerate, !isSelf(member) else { return }
+                            guard viewModel.canManageMembers, !isSelf(member) else { return }
                             memberForActions = member
                             Haptics.selection()
                         }

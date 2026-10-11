@@ -1,4 +1,5 @@
 import Foundation
+import WebRTCBridge
 
 // MARK: - VoiceRoomService
 //
@@ -13,8 +14,24 @@ protocol VoiceRoomService: Sendable {
     func currentRoom() async -> VoiceRoom?
     func joinRoom(conversationID: UUID, groupName: String) async
     func leaveRoom() async
+    func retryJoin() async
     func setMuted(_ muted: Bool) async
     func setDeafened(_ deafened: Bool) async
+    /// Camera publishing for the local user.
+    func setCameraEnabled(_ enabled: Bool) async
+    /// Local-only per-user output gain, 0.0–1.0.
+    func setParticipantVolume(fingerprintHex: String, volume: Float) async
+    /// Room mode (open floor / stage). Host-only; ignored otherwise.
+    func setRoomMode(_ mode: VoiceRoomMode) async
+    /// Raise/lower the local user's hand (stage audience).
+    func raiseHand(_ raised: Bool) async
+    /// Approve/deny a raised hand (host-only).
+    func setSpeakerApproval(fingerprintHex: String, approved: Bool) async
+    /// This side's WebRTC session UUID for a peer (video sinks).
+    func videoCallID(for fingerprintHex: String) async -> UUID?
+    /// Local camera preview plumbing for the room UI.
+    func attachLocalPreview(_ renderer: RTCVideoRenderer) async
+    func detachLocalPreview(_ renderer: RTCVideoRenderer) async
 }
 
 // MARK: - DeviceLinkService

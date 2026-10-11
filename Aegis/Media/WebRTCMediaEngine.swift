@@ -61,11 +61,83 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
     private let log = Logger(subsystem: "app.aegis.ios", category: "webrtc")
     private let lock = NSLock()
     private var factory: RTCPeerConnectionFactory?
+    /// Bumped by `rotateMediaIdentity()`. The cached factory is dropped and
+    /// the next created peer connection gets a fresh DTLS certificate, so
+    /// re-established mesh connections after a membership change derive
+    /// fresh SRTP keys (forward secrecy for join/leave).
+    private var factoryGeneration = 0
+    private var activeFactoryGeneration = -1
     private var peers: [UUID: PeerMedia] = [:]
     private var pcToCallID: [ObjectIdentifier: UUID] = [:]
     private var renderers: [UUID: RemoteFrameRenderer] = [:]
     private var frameRouter: CallMediaRouter?
     private var callKinds: [UUID: CallKind] = [:]
+
+    // MARK: Shared camera (one AVCaptureSession feeding every peer)
+
+    /// A voice-room mesh has one peer connection per remote participant but
+    /// the device has one camera. The fan-out owns the single
+    /// RTCCameraVideoCapturer and forwards each frame to every registered
+    /// peer connection's own RTCVideoSource, so per-PC screen sharing can
+    /// still take over a single PC's source without renegotiation.
+    private var cameraFanOut: CameraFrameFanOut?
+    /// callIDs whose video source is currently registered with the fan-out.
+    private var cameraUsers: Set<UUID> = []
+
+    // MARK: Voice-room audio (software mixer for per-user volume)
+
+    /// Peer connections that belong to the voice-room mesh (vs 1:1 calls).
+    /// Room peers never render remote audio through WebRTC: each remote
+    /// audio track is tapped and mixed locally with per-user gain.
+    private var roomPeers: Set<UUID> = []
+    /// Pending per-user gains (0.0–1.0), applied when the audio tap attaches.
+    private var roomGains: [UUID: Float] = [:]
+    private var roomMixer = RoomAudioMixer()
+    private var roomMixerRunning = false
+
+    // MARK: Audio-level polling (speaking indicators)
+
+    private var levelTimer: DispatchSourceTimer?
+    private var lastLevels: [UUID: CallAudioLevels] = [:]
+
+    // MARK: Engine callbacks (CallMediaControl)
+
+    private var _onAudioLevels: (([UUID: CallAudioLevels]) -> Void)?
+    private var _onPeerConnectionStateChanged: ((UUID, PeerConnectionState) -> Void)?
+    private var _onCameraPermissionDenied: (() -> Void)?
+
+    // MARK: Local camera preview
+
+    private var localPreviewRenderers: [WeakVideoRenderer] = []
+
+    /// Assumes the engine lock is held. Keeps the room UI's local preview
+    /// attached to the first camera-active peer connection's video track.
+    private func refreshLocalPreviewLocked() {
+        localPreviewRenderers.removeAll { $0.value == nil }
+        let renderers = localPreviewRenderers.compactMap(\.value)
+        for media in peers.values {
+            guard let track = media.videoTrack else { continue }
+            for renderer in renderers { track.remove(renderer) }
+        }
+        guard let target = peers.values.first(where: { cameraUsers.contains($0.callID) }),
+              let track = target.videoTrack
+        else { return }
+        for renderer in renderers { track.add(renderer) }
+    }
+
+    // MARK: Room mixer lifecycle
+
+    private func maybeStartRoomMixerLocked() {
+        guard !roomPeers.isEmpty else { return }
+        if !roomMixer.start() {
+            log.error("Room audio mixer failed to start; room audio will be silent")
+        }
+    }
+
+    private func maybeStopRoomMixerLocked() {
+        guard roomPeers.isEmpty else { return }
+        roomMixer.stop()
+    }
 
     /// Connects the engine to the transport's frame router. Called once at
     /// startup (after AegisCore exists); remote frames are dropped until
@@ -77,12 +149,18 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
     // MARK: - Peer sessions (lock-guarded)
 
     private func makeFactoryLocked() -> RTCPeerConnectionFactory {
-        if let factory { return factory }
+        // A rotated identity drops the cached factory: the next factory
+        // generates a fresh DTLS certificate, so re-established peer
+        // connections after a membership change handshake fresh SRTP keys.
+        // Live peer connections keep their old factory (and keys) until
+        // the caller tears them down — rotation only affects new ones.
+        if let factory, activeFactoryGeneration == factoryGeneration { return factory }
         let created = RTCPeerConnectionFactory(
             encoderFactory: RTCDefaultVideoEncoderFactory(),
             decoderFactory: RTCDefaultVideoDecoderFactory()
         )
         factory = created
+        activeFactoryGeneration = factoryGeneration
         configureAudioSessionLocked()
         return created
     }
@@ -157,11 +235,23 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
             startCameraLocked(for: callID)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                if granted { self?.startCamera(for: callID) }
+                guard let self else { return }
+                if granted {
+                    self.startCamera(for: callID)
+                } else {
+                    self.lock.withLock {
+                        self.peers[callID]?.videoTrack?.isEnabled = false
+                    }
+                    self.onCameraPermissionDenied?()
+                }
             }
         case .denied, .restricted:
             log.error("Camera access denied; continuing audio-only")
             peers[callID]?.videoTrack?.isEnabled = false
+            // Read the callback without re-entering the engine lock
+            // (NSLock is not recursive) and hop to main for the UI.
+            let callback = _onCameraPermissionDenied
+            DispatchQueue.main.async { callback?() }
         @unknown default:
             break
         }
@@ -173,31 +263,105 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
         lock.withLock { startCameraLocked(for: callID) }
     }
 
-    /// Assumes the engine lock is held.
+    /// Assumes the engine lock is held. Registers this peer connection's
+    /// video source with the shared camera fan-out and starts the single
+    /// AVCaptureSession (idempotent across mesh peers).
     private func startCameraLocked(for callID: UUID) {
         guard let media = peers[callID], let source = media.videoSource else { return }
-        let capturer: RTCCameraVideoCapturer
-        if let existing = media.cameraCapturer {
-            capturer = existing
-        } else {
-            capturer = RTCCameraVideoCapturer(delegate: source)
-            media.cameraCapturer = capturer
+        let fanOut = cameraFanOut ?? {
+            let created = CameraFrameFanOut()
+            cameraFanOut = created
+            return created
+        }()
+        fanOut.addSource(source)
+        cameraUsers.insert(callID)
+        fanOut.start()
+        refreshLocalPreviewLocked()
+    }
+
+    /// Assumes the engine lock is held. Unregisters this peer connection
+    /// from the shared camera; stops the capture session when the last
+    /// user leaves.
+    private func stopCameraLocked(for callID: UUID) {
+        guard let media = peers[callID] else { return }
+        if let source = media.videoSource {
+            cameraFanOut?.removeSource(source)
         }
-        let devices = RTCCameraVideoCapturer.captureDevices()
-        guard let device = devices.first(where: { $0.position == .front }) ?? devices.first
-        else {
-            log.error("No camera device found")
-            return
+        cameraUsers.remove(callID)
+        if cameraUsers.isEmpty {
+            cameraFanOut?.stop()
         }
-        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
-        guard let format = formats.first(where: {
-            CMVideoFormatDescriptionGetDimensions($0.formatDescription).width == 640
-        }) ?? formats.first else {
-            log.error("No suitable camera format")
-            return
+        refreshLocalPreviewLocked()
+    }
+}
+
+// MARK: - Shared camera fan-out
+
+/// One RTCCameraVideoCapturer feeding many RTCVideoSources.
+///
+/// A voice-room mesh negotiates one peer connection per remote participant,
+/// each with its own local RTCVideoSource/RTCVideoTrack — but the device
+/// has a single camera. The fan-out owns the one AVCaptureSession and
+/// forwards every captured frame to each registered source, so all mesh
+/// peers publish the same camera frames. Per-PC screen sharing still works:
+/// a sharing peer unregisters its source from the fan-out and points a
+/// WindowSnapshotCapturer at it instead, with no renegotiation.
+final class CameraFrameFanOut: NSObject, RTCVideoCapturerDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturer: RTCCameraVideoCapturer?
+    private var sources: [ObjectIdentifier: RTCVideoSource] = [:]
+    private let log = Logger(subsystem: "app.aegis.ios", category: "webrtc")
+
+    func addSource(_ source: RTCVideoSource) {
+        lock.withLock { sources[ObjectIdentifier(source)] = source }
+    }
+
+    func removeSource(_ source: RTCVideoSource) {
+        lock.withLock { sources.removeValue(forKey: ObjectIdentifier(source)) }
+    }
+
+    /// Starts the shared capture session (no-op when already running).
+    func start() {
+        lock.withLock {
+            if capturer != nil { return }
+            let created = RTCCameraVideoCapturer(delegate: self)
+            capturer = created
+            let devices = RTCCameraVideoCapturer.captureDevices()
+            guard let device = devices.first(where: { $0.position == .front }) ?? devices.first
+            else {
+                log.error("No camera device found")
+                capturer = nil
+                return
+            }
+            let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
+            guard let format = formats.first(where: {
+                CMVideoFormatDescriptionGetDimensions($0.formatDescription).width == 640
+            }) ?? formats.first else {
+                log.error("No suitable camera format")
+                capturer = nil
+                return
+            }
+            let fps = min(Int(format.videoSupportedFrameRateRanges.first?.maxFrameRate ?? 30), 24)
+            created.startCapture(with: device, format: format, fps: fps)
         }
-        let fps = min(Int(format.videoSupportedFrameRateRanges.first?.maxFrameRate ?? 30), 24)
-        capturer.startCapture(with: device, format: format, fps: fps)
+    }
+
+    func stop() {
+        lock.withLock {
+            capturer?.stopCapture()
+            capturer = nil
+        }
+    }
+
+    // MARK: RTCVideoCapturerDelegate
+
+    func capturer(_ capturer: RTCVideoCapturer, didCapture frame: RTCVideoFrame) {
+        // Fan out to every registered peer connection's source.
+        // RTCVideoSource is thread-safe for capturer callbacks.
+        let targets = lock.withLock { Array(sources.values) }
+        for source in targets {
+            source.capturer(capturer, didCapture: frame)
+        }
     }
 }
 
@@ -327,8 +491,15 @@ extension WebRTCMediaEngine: CallMediaControl {
         lock.withLock {
             guard let media = peers[callID] else { return }
             media.remoteAudioMuted = !enabled
-            for track in media.remoteAudioTracks {
-                track.isEnabled = enabled
+            if roomPeers.contains(callID) {
+                // Room peers render through the software mixer: deafen is
+                // the mixer's master gain (every room peer shares the same
+                // deafen state, so setting it per callID is idempotent).
+                roomMixer.setMasterGain(enabled ? 1.0 : 0.0)
+            } else {
+                for track in media.remoteAudioTracks {
+                    track.isEnabled = enabled
+                }
             }
         }
     }
@@ -343,7 +514,7 @@ extension WebRTCMediaEngine: CallMediaControl {
                 // restart the camera underneath it.
                 if !media.isScreenSharing { requestCameraAndStartLocked(for: callID) }
             } else {
-                media.cameraCapturer?.stopCapture()
+                stopCameraLocked(for: callID)
             }
         }
     }
@@ -366,7 +537,7 @@ extension WebRTCMediaEngine: CallMediaControl {
             guard media.screenCapturer == nil else { return }
             // Pause the camera; the screen capturer takes over the same
             // video source so the peer sees our app content instead.
-            media.cameraCapturer?.stopCapture()
+            stopCameraLocked(for: callID)
             let capturer = WindowSnapshotCapturer(delegate: source)
             capturer.start()
             media.screenCapturer = capturer
@@ -390,14 +561,207 @@ extension WebRTCMediaEngine: CallMediaControl {
     func endCallMedia(_ callID: UUID) {
         lock.withLock {
             guard let media = peers.removeValue(forKey: callID) else { return }
-            media.cameraCapturer?.stopCapture()
+            stopCameraLocked(for: callID)
             media.screenCapturer?.stop()
+            media.broadcastController?.stop()
+            if let tap = media.audioTap {
+                roomMixer.removePeer(tap.peerID)
+            }
+            roomPeers.remove(callID)
+            roomGains.removeValue(forKey: callID)
+            maybeStopRoomMixerLocked()
+            refreshLocalPreviewLocked()
             media.connection.close()
             pcToCallID = pcToCallID.filter { $0.value != callID }
             renderers.removeValue(forKey: callID)
             callKinds.removeValue(forKey: callID)
+            lastLevels.removeValue(forKey: callID)
         }
     }
+}
+
+// MARK: - Voice-room mesh extras (CallMediaControl)
+
+extension WebRTCMediaEngine {
+    var onAudioLevels: (([UUID: CallAudioLevels]) -> Void)? {
+        get { lock.withLock { _onAudioLevels } }
+        set { lock.withLock { _onAudioLevels = newValue } }
+    }
+
+    var onPeerConnectionStateChanged: ((UUID, PeerConnectionState) -> Void)? {
+        get { lock.withLock { _onPeerConnectionStateChanged } }
+        set { lock.withLock { _onPeerConnectionStateChanged = newValue } }
+    }
+
+    var onCameraPermissionDenied: (() -> Void)? {
+        get { lock.withLock { _onCameraPermissionDenied } }
+        set { lock.withLock { _onCameraPermissionDenied = newValue } }
+    }
+
+    func noteVoiceRoomPeer(_ callID: UUID) {
+        lock.withLock { roomPeers.insert(callID) }
+    }
+
+    func setRemoteVolume(_ volume: Float, for callID: UUID) {
+        lock.withLock {
+            let clamped = max(0, min(2, volume))
+            roomGains[callID] = clamped
+            roomMixer.setGain(clamped, for: callID)
+            peers[callID]?.audioTap?.gain = clamped
+        }
+    }
+
+    func rotateMediaIdentity() {
+        // The next peer connection gets a fresh DTLS certificate from a
+        // new factory; existing connections are unaffected until the caller
+        // tears them down (VoiceRoomManager's membership-epoch rotation).
+        lock.withLock { factoryGeneration += 1 }
+    }
+
+    func setAudioLevelPolling(_ enabled: Bool) {
+        lock.withLock {
+            levelTimer?.cancel()
+            levelTimer = nil
+            guard enabled else { return }
+            let timer = DispatchSource.makeTimerSource()
+            timer.schedule(deadline: .now() + .milliseconds(300), repeating: .milliseconds(300))
+            timer.setEventHandler { [weak self] in self?.pollAudioLevels() }
+            timer.resume()
+            levelTimer = timer
+        }
+    }
+
+    func attachLocalVideoRenderer(_ renderer: RTCVideoRenderer) {
+        lock.withLock {
+            if !localPreviewRenderers.contains(where: { $0.value === renderer }) {
+                localPreviewRenderers.append(WeakVideoRenderer(renderer))
+            }
+            refreshLocalPreviewLocked()
+        }
+    }
+
+    func detachLocalVideoRenderer(_ renderer: RTCVideoRenderer) {
+        lock.withLock {
+            localPreviewRenderers.removeAll { $0.value == nil || $0.value === renderer }
+            refreshLocalPreviewLocked()
+        }
+    }
+
+    // MARK: Audio-level polling internals
+
+    private func pollAudioLevels() {
+        let snapshot: [(UUID, RTCPeerConnection)] = lock.withLock {
+            peers.map { ($0.key, $0.value.connection) }
+        }
+        for (callID, connection) in snapshot {
+            // M154: statsWithCompletionHandler delivers [RTCStatsReport].
+            // The manager maps callIDs to voice-room peers; 1:1 calls never
+            // enable polling, so their stats are simply never requested.
+            connection.stats { [weak self] reports in
+                self?.handleStatsReports(reports, callID: callID)
+            }
+        }
+    }
+
+    private func handleStatsReports(_ reports: [RTCStatsReport], callID: UUID) {
+        var local: Float = 0
+        var remote: Float = 0
+        for report in reports {
+            // RTCStatsReport.values is NSDictionary<NSString *, id>;
+            // bridge to [String: Any] for the W3C stats keys.
+            let values = report.values as? [String: Any] ?? [:]
+            guard let type = values["type"] as? String,
+                  let kind = values["kind"] as? String,
+                  kind == "audio"
+            else { continue }
+            // audioLevel is the RFC 6464 client-to-mixer audio level,
+            // 0.0–1.0 linear energy. Absent when the peer doesn't negotiate
+            // the header extension — then levels stay 0 (no indicator).
+            let level = (values["audioLevel"] as? NSNumber)?.floatValue ?? 0
+            if type == "inbound-rtp" {
+                remote = max(remote, level)
+            } else if type == "outbound-rtp" {
+                local = max(local, level)
+            }
+        }
+        let (callback, snapshot): (([UUID: CallAudioLevels]) -> Void)?, [UUID: CallAudioLevels] =
+            lock.withLock {
+                lastLevels[callID] = CallAudioLevels(local: local, remote: remote)
+                return (_onAudioLevels, lastLevels)
+            }
+        callback?(snapshot)
+    }
+}
+
+// MARK: - Screen-share extras (CallMediaControl)
+
+extension WebRTCMediaEngine {
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws {
+        try lock.withLock {
+            guard let capturer = peers[callID]?.screenCapturer else { throw EngineError.noSuchCall }
+            capturer.setPaused(paused)
+        }
+    }
+
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws {
+        try lock.withLock {
+            guard let capturer = peers[callID]?.screenCapturer else { throw EngineError.noSuchCall }
+            capturer.setRedactionRegions(regions)
+        }
+    }
+
+    func startBroadcastShare(callID: UUID) async throws {
+        try lock.withLock {
+            let media = try peerLocked(for: callID)
+            guard let source = media.videoSource, let track = media.videoTrack
+            else { throw EngineError.noSuchCall }
+            guard media.broadcastController == nil else { return }
+            // The broadcast owns the video track while active, like the
+            // in-app screen capturer.
+            stopCameraLocked(for: callID)
+            media.screenCapturer?.stop()
+            media.screenCapturer = nil
+            media.isScreenSharing = false
+            let controller = BroadcastShareController()
+            controller.onFirstFrame = { [weak self] in
+                self?.log.info("Broadcast extension frames arriving; video track is live")
+            }
+            controller.start(source: source)
+            media.broadcastController = controller
+            media.isBroadcastSharing = true
+            track.isEnabled = true
+            refreshLocalPreviewLocked()
+        }
+    }
+
+    func stopBroadcastShare(callID: UUID) async throws {
+        lock.withLock {
+            guard let media = peers[callID] else { return }
+            media.broadcastController?.stop()
+            media.broadcastController = nil
+            media.isBroadcastSharing = false
+            if media.videoEnabled { requestCameraAndStartLocked(for: callID) }
+            refreshLocalPreviewLocked()
+        }
+    }
+
+    var broadcastShareSupported: Bool {
+        // The Broadcast Upload Extension ships inside the app bundle's
+        // PlugIns directory. Absent (e.g. simulator, sideload without the
+        // extension), the UI offers in-app sharing only — never a dead
+        // button.
+        guard let plugins = Bundle.main.builtInPlugInsURL else { return false }
+        return (try? FileManager.default.contentsOfDirectory(
+            at: plugins, includingPropertiesForKeys: nil
+        ))?.contains(where: { $0.pathExtension == "appex" }) ?? false
+    }
+}
+
+/// Weak box for local-preview renderers so a dismissed room view can't be
+/// kept alive by the engine.
+private final class WeakVideoRenderer {
+    weak var value: (any RTCVideoRenderer)?
+    init(_ value: any RTCVideoRenderer) { self.value = value }
 }
 
 // MARK: - RTCPeerConnectionDelegate
@@ -419,6 +783,24 @@ extension WebRTCMediaEngine: RTCPeerConnectionDelegate {
         // The aggregate connection state: .connected here means media is
         // actually flowing (DTLS handshake done), beyond ICE alone.
         log.info("Peer connection state: \(String(describing: newState))")
+        let mapped: PeerConnectionState
+        switch newState {
+        case .new, .connecting:
+            mapped = .connecting
+        case .connected:
+            mapped = .connected
+        case .disconnected:
+            mapped = .reconnecting
+        case .failed:
+            mapped = .failed
+        case .closed:
+            mapped = .closed
+        @unknown default:
+            mapped = .connecting
+        }
+        if let callID = lock.withLock({ pcToCallID[ObjectIdentifier(peerConnection)] }) {
+            onPeerConnectionStateChanged?(callID, mapped)
+        }
     }
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
@@ -448,9 +830,31 @@ extension WebRTCMediaEngine: RTCPeerConnectionDelegate {
         // audio plays through the shared RTCAudioSession by default.
         if let audioTrack = rtpReceiver.track as? RTCAudioTrack {
             lock.withLock {
-                if let callID = pcToCallID[ObjectIdentifier(peerConnection)],
-                   let media = peers[callID]
-                {
+                guard let callID = pcToCallID[ObjectIdentifier(peerConnection)],
+                      let media = peers[callID]
+                else { return }
+                if roomPeers.contains(callID) {
+                    // Voice-room mesh: remote audio never renders through
+                    // WebRTC. A tap feeds decoded PCM into the software
+                    // mixer, which applies per-user gain locally. The track
+                    // stays disabled so there is no double playback.
+                    //
+                    // Assumption (on-device QA): RTCAudioSink keeps
+                    // receiving decoded frames while the track is disabled;
+                    // disabling only removes the track from WebRTC's output
+                    // mix — the same mechanism the existing deafen feature
+                    // already relies on.
+                    audioTrack.isEnabled = false
+                    if media.audioTap == nil {
+                        let tap = RoomAudioTap(peerID: callID)
+                        tap.gain = roomGains[callID] ?? 1.0
+                        audioTrack.add(tap)
+                        media.audioTap = tap
+                        roomMixer.addPeer(tap)
+                        roomMixer.setGain(tap.gain, for: tap.peerID)
+                        maybeStartRoomMixerLocked()
+                    }
+                } else {
                     media.remoteAudioTracks.append(audioTrack)
                     audioTrack.isEnabled = !media.remoteAudioMuted
                 }
@@ -479,12 +883,19 @@ private final class PeerMedia {
     var audioTrack: RTCAudioTrack?
     var videoTrack: RTCVideoTrack?
     var videoSource: RTCVideoSource?
-    var cameraCapturer: RTCCameraVideoCapturer?
+    /// Per-PC screen capturer (1:1 screen share takes over videoSource).
     var screenCapturer: WindowSnapshotCapturer?
+    /// Broadcast-upload controller (full-device sharing); takes over
+    /// videoSource like the screen capturer.
+    var broadcastController: BroadcastShareController?
+    /// Voice-room remote-audio tap feeding the software mixer.
+    var audioTap: RoomAudioTap?
     var videoEnabled = true
     var isScreenSharing = false
+    var isBroadcastSharing = false
     var createdOffer = false
-    /// Remote audio tracks received on this connection (voice rooms).
+    /// Remote audio tracks received on this connection (1:1 calls and
+    /// non-mixer paths). Voice-room peers render through the mixer instead.
     var remoteAudioTracks: [RTCAudioTrack] = []
     /// Deafen state: when true, remote audio tracks stay disabled.
     var remoteAudioMuted = false
@@ -613,6 +1024,22 @@ extension RTCI420BufferProtocol {
 final class WindowSnapshotCapturer: RTCVideoCapturer, @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private let log = Logger(subsystem: "app.aegis.ios", category: "webrtc")
+    private let stateLock = NSLock()
+    private var _isPaused = false
+    /// Opaque redaction rectangles in normalized unit coordinates (0–1)
+    /// relative to the window bounds, painted on-device before encoding.
+    private var _redactionRegions: [CGRect] = []
+
+    /// Pauses frame capture; the peer keeps seeing the last frame and the
+    /// video track stays live, so resume needs no renegotiation.
+    func setPaused(_ paused: Bool) {
+        stateLock.withLock { _isPaused = paused }
+    }
+
+    /// Sets the on-device redaction regions (normalized 0–1 rects).
+    func setRedactionRegions(_ regions: [CGRect]) {
+        stateLock.withLock { _redactionRegions = regions.map { $0.clampedToUnit() } }
+    }
 
     func start() {
         stop()
@@ -639,12 +1066,17 @@ final class WindowSnapshotCapturer: RTCVideoCapturer, @unchecked Sendable {
 
     @MainActor
     private func captureOnceOnMain() {
+        let (isPaused, regions) = stateLock.withLock { (_isPaused, _redactionRegions) }
+        guard !isPaused else { return }
         guard let window = UIApplication.shared.firstKeyWindow,
               window.bounds.width > 1, window.bounds.height > 1 else { return }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 0.5 // Half resolution keeps the bitrate reasonable.
-        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+        var image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
             _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+        }
+        if !regions.isEmpty {
+            image = image.redacted(regions: regions)
         }
         guard let cgImage = image.cgImage,
               let pixelBuffer = cgImage.makePixelBuffer(),
@@ -656,6 +1088,44 @@ final class WindowSnapshotCapturer: RTCVideoCapturer, @unchecked Sendable {
             timeStampNs: Int64(Date().timeIntervalSince1970 * 1_000_000_000)
         )
         delegate.capturer(self, didCapture: frame)
+    }
+}
+
+// MARK: - Redaction helpers
+
+extension CGRect {
+    /// Clamps to normalized unit coordinates (0–1), dropping degenerate rects.
+    func clampedToUnit() -> CGRect {
+        let x = max(0, min(1, origin.x))
+        let y = max(0, min(1, origin.y))
+        let w = max(0, min(1 - x, size.width))
+        let h = max(0, min(1 - y, size.height))
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    var isDegenerate: Bool { width <= 0.01 || height <= 0.01 }
+}
+
+extension UIImage {
+    /// Paints opaque black rectangles over the image. Redaction is applied
+    /// on-device before the frame is encoded — redacted pixels never leave
+    /// the device in any form.
+    func redacted(regions: [CGRect]) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            draw(at: .zero)
+            UIColor.black.setFill()
+            for region in regions where !region.isDegenerate {
+                let rect = CGRect(
+                    x: region.origin.x * size.width,
+                    y: region.origin.y * size.height,
+                    width: region.width * size.width,
+                    height: region.height * size.height
+                )
+                UIRectFill(rect)
+            }
+        }
     }
 }
 

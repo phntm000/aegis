@@ -1,5 +1,7 @@
+import AegisModeration
 import AegisTransport
 import Foundation
+import WebRTCBridge
 
 // MARK: - Preview services
 //
@@ -84,6 +86,8 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
         cont.yield(.updated(nil))
     }
 
+    func retryJoin() async {}
+
     func setMuted(_ muted: Bool) async {
         lock.withLock {
             room?.localMuted = muted
@@ -103,6 +107,55 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
         }
         cont.yield(.updated(lock.withLock { room }))
     }
+
+    func setCameraEnabled(_ enabled: Bool) async {
+        lock.withLock {
+            room?.localCameraOn = enabled
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].isCameraOn = enabled
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex }) {
+                room?.participants[i].volume = max(0, min(1, volume))
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setRoomMode(_ mode: VoiceRoomMode) async {
+        lock.withLock { room?.mode = mode }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func raiseHand(_ raised: Bool) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: \.isLocal) {
+                room?.participants[i].hasHandRaised = raised
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func setSpeakerApproval(fingerprintHex: String, approved: Bool) async {
+        lock.withLock {
+            if let i = room?.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex }) {
+                room?.participants[i].isSpeaker = approved
+                room?.participants[i].hasHandRaised = false
+            }
+        }
+        cont.yield(.updated(lock.withLock { room }))
+    }
+
+    func videoCallID(for fingerprintHex: String) async -> UUID? { nil }
+
+    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {}
+
+    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {}
 }
 
 // MARK: - Mock device link (inert)
@@ -293,6 +346,7 @@ actor MockTransport: TransportService {
     private let incomingCallContinuation: AsyncStream<IncomingCall>.Continuation
     private let callStateContinuation: AsyncStream<CallStateEvent>.Continuation
     private let groupContinuation: AsyncStream<GroupEvent>.Continuation
+    nonisolated let broadcastShareSupported = false
 
     private var relayConfig = RelayConfig.default
     private var sentEnvelopes: [OutgoingEnvelope] = []
@@ -422,6 +476,10 @@ actor MockTransport: TransportService {
     func setCallSpeaker(_ enabled: Bool, callID: UUID) async throws {}
     func startScreenShare(callID: UUID) async throws {}
     func stopScreenShare(callID: UUID) async throws {}
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws {}
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws {}
+    func startBroadcastShare(callID: UUID) async throws {}
+    func stopBroadcastShare(callID: UUID) async throws {}
     nonisolated func setVideoSink(_ sink: (any VideoSink)?, for callID: UUID) {}
 
     // MARK: Groups
@@ -437,6 +495,64 @@ actor MockTransport: TransportService {
     func leaveConversation(_ conversationID: UUID) async throws {}
     func requestGroupJoin(code: String) async throws {}
     func approveJoinRequest(_ request: JoinRequest) async throws {}
+
+    // MARK: Moderation (preview: in-memory, no signatures)
+
+    private var channelPolicies: [UUID: ChannelPermissionPolicy] = [:]
+    private var inviteGenerations: [UUID: Int] = [:]
+    private var presenceSuppressed: Set<UUID> = []
+
+    func setSlowMode(_ interval: TimeInterval?, conversationID: UUID) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        policy.slowModeInterval = interval
+        channelPolicies[conversationID] = policy
+    }
+
+    func setChannelPermission(
+        _ permission: GroupPermission,
+        granted: Bool,
+        for role: MemberRole,
+        conversationID: UUID
+    ) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        let modRole = role.moderationRole
+        var grants = policy.overrides[modRole] ?? PermissionEvaluator.defaultGrants(for: modRole)
+        if granted { grants.insert(permission) } else { grants.remove(permission) }
+        policy.overrides[modRole] = grants
+        channelPolicies[conversationID] = policy
+    }
+
+    func revokeInvite(conversationID: UUID) async throws {
+        inviteGenerations[conversationID, default: 0] += 1
+    }
+
+    func resetChannelPermissions(for role: MemberRole, conversationID: UUID) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        policy.overrides.removeValue(forKey: role.moderationRole)
+        channelPolicies[conversationID] = policy
+    }
+
+    func transferOwnership(to contactID: UUID, conversationID: UUID) async throws {}
+
+    func setPresenceSuppressed(_ suppressed: Bool, conversationID: UUID) async {
+        if suppressed {
+            presenceSuppressed.insert(conversationID)
+        } else {
+            presenceSuppressed.remove(conversationID)
+        }
+    }
+
+    func channelModerationSnapshot(conversationID: UUID) async -> ChannelModerationSnapshot? {
+        ChannelModerationSnapshot(
+            policy: channelPolicies[conversationID] ?? .default(),
+            auditEvents: [],
+            auditVerification: .empty,
+            myRole: .owner,
+            inviteGeneration: inviteGenerations[conversationID] ?? 0
+        )
+    }
+
+    func noteLocalAuditEvent(kind: GroupAdminEventKind, conversationID: UUID, detail: String?) async {}
 
     // MARK: Identity-change tracking (preview: not simulated)
 
@@ -486,6 +602,10 @@ actor MockStore: StoreService {
         return Array(list.prefix(limit))
     }
 
+    func fetchMessage(id: UUID, conversationID: UUID) async throws -> Message? {
+        messages[conversationID]?.first { $0.id == id }
+    }
+
     func saveMessage(_ message: Message) async throws {
         var list = messages[message.conversationID] ?? []
         list.insert(message, at: 0)
@@ -529,6 +649,34 @@ actor MockStore: StoreService {
 
     func pendingOutbox() async throws -> [Message] {
         messages.values.flatMap { $0 }.filter { $0.status == .sending && $0.isFromMe }
+    }
+
+    func fetchThreadReplies(conversationID: UUID, threadRootID: UUID) async throws -> [Message] {
+        (messages[conversationID] ?? [])
+            .filter { $0.threadRootID == threadRootID }
+            .sorted { $0.sentAt < $1.sentAt }
+    }
+
+    func fetchThreadSummaries(conversationID: UUID) async throws -> [UUID: ThreadSummary] {
+        var out: [UUID: ThreadSummary] = [:]
+        for message in messages[conversationID] ?? [] {
+            guard let root = message.threadRootID else { continue }
+            if var existing = out[root] {
+                existing.replyCount += 1
+                existing.lastActivityAt = max(existing.lastActivityAt, message.sentAt)
+                out[root] = existing
+            } else {
+                out[root] = ThreadSummary(replyCount: 1, lastActivityAt: message.sentAt)
+            }
+        }
+        return out
+    }
+
+    func fetchStarredMessages(conversationID: UUID?) async throws -> [Message] {
+        messages.values.flatMap { $0 }
+            .filter { $0.isStarred && !$0.isDeleted }
+            .filter { conversationID == nil || $0.conversationID == conversationID }
+            .sorted { $0.sentAt > $1.sentAt }
     }
 
     func fetchContacts() async throws -> [Contact] {

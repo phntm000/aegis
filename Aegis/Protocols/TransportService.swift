@@ -1,3 +1,4 @@
+import AegisModeration
 import AegisTransport
 import Foundation
 
@@ -15,6 +16,9 @@ enum EnvelopeKind: String, Sendable, Codable {
     case reaction
     case edit
     case delete
+    case poll
+    case ballot
+    case pin
     case readReceipt
     case typing
     case screenshotNotice
@@ -124,6 +128,8 @@ struct GroupEvent: Sendable, Hashable {
         case roleChanged
         case topicChanged
         case announcementModeChanged
+        case slowModeChanged
+        case permissionsChanged
     }
 
     let conversationID: UUID
@@ -136,6 +142,57 @@ struct GroupEvent: Sendable, Hashable {
     let topic: String?
     /// New value for announcementModeChanged.
     let announcementOnly: Bool?
+    /// New slow-mode interval for slowModeChanged (nil = off).
+    let slowModeInterval: TimeInterval?
+
+    init(
+        conversationID: UUID,
+        kind: Kind,
+        memberKey: Data? = nil,
+        role: MemberRole? = nil,
+        topic: String? = nil,
+        announcementOnly: Bool? = nil,
+        slowModeInterval: TimeInterval? = nil
+    ) {
+        self.conversationID = conversationID
+        self.kind = kind
+        self.memberKey = memberKey
+        self.role = role
+        self.topic = topic
+        self.announcementOnly = announcementOnly
+        self.slowModeInterval = slowModeInterval
+    }
+}
+
+/// A point-in-time view of a channel's moderation state for the settings UI:
+/// the signed permission policy, the hash-chained audit log, and its
+/// verification result.
+struct ChannelModerationSnapshot: Sendable {
+    /// The channel's permission policy (signed group state).
+    let policy: ChannelPermissionPolicy
+    /// The per-group audit log, newest last.
+    let auditEvents: [SignedGroupEvent]
+    /// Verification of the audit chain against the roster's keys.
+    let auditVerification: AuditVerification
+    /// Our role, for gating which controls are shown.
+    let myRole: MemberRole?
+    /// Current invite generation: invites embed the generation they were
+    /// issued at; the UI stamps new invites with this.
+    let inviteGeneration: Int
+
+    init(
+        policy: ChannelPermissionPolicy,
+        auditEvents: [SignedGroupEvent],
+        auditVerification: AuditVerification,
+        myRole: MemberRole?,
+        inviteGeneration: Int = 0
+    ) {
+        self.policy = policy
+        self.auditEvents = auditEvents
+        self.auditVerification = auditVerification
+        self.myRole = myRole
+        self.inviteGeneration = inviteGeneration
+    }
 }
 
 /// A pending request to join a group/channel, received after someone
@@ -150,19 +207,24 @@ struct JoinRequest: Sendable, Hashable, Identifiable {
     let requesterFingerprint: Data
     let requesterName: String
     let receivedAt: Date
+    /// The invite generation the requester's code was issued at (nil for
+    /// legacy codes, which predate revocation and are always honored).
+    let inviteGeneration: Int?
 
     init(
         id: UUID = UUID(),
         conversationID: UUID,
         requesterFingerprint: Data,
         requesterName: String,
-        receivedAt: Date = Date()
+        receivedAt: Date = Date(),
+        inviteGeneration: Int? = nil
     ) {
         self.id = id
         self.conversationID = conversationID
         self.requesterFingerprint = requesterFingerprint
         self.requesterName = requesterName
         self.receivedAt = receivedAt
+        self.inviteGeneration = inviteGeneration
     }
 }
 
@@ -243,6 +305,18 @@ protocol TransportService: Sendable {
     /// False on platforms/transports without a capture pipeline; the UI then
     /// explains instead of showing a dead button.
     var screenShareSupported: Bool { get }
+    /// Pauses frame capture (the peer sees a frozen frame); resume needs
+    /// no renegotiation.
+    func setScreenSharePaused(_ paused: Bool, callID: UUID) async throws
+    /// Opaque redaction rectangles painted over captured frames on-device,
+    /// before encoding. Normalized unit coordinates (0–1) in window space.
+    func setScreenShareRedactionRegions(_ regions: [CGRect], callID: UUID) async throws
+    /// Full-device sharing via the ReplayKit Broadcast Upload Extension.
+    /// Throws when the extension isn't bundled.
+    func startBroadcastShare(callID: UUID) async throws
+    func stopBroadcastShare(callID: UUID) async throws
+    /// True when the Broadcast Upload Extension is bundled with the app.
+    var broadcastShareSupported: Bool { get }
     /// Register the view that renders decoded remote video frames for a
     /// call (see AegisTransport.CallMediaRouter / VideoSink). Pass nil to
     /// unregister. Dropped silently when the call has no media pipeline.
@@ -257,6 +331,39 @@ protocol TransportService: Sendable {
     func setMemberRole(_ contactID: UUID, role: MemberRole, in conversationID: UUID) async throws
     func setAnnouncementOnly(_ enabled: Bool, conversationID: UUID) async throws
     func setGroupTopic(_ topic: String?, conversationID: UUID) async throws
+    /// Sets the channel's slow-mode interval (nil = off). Valid range is
+    /// 5s…6h; values outside are clamped. Owner/admin only. The change is
+    /// a signed group event, replicated to members and audit-logged.
+    func setSlowMode(_ interval: TimeInterval?, conversationID: UUID) async throws
+    /// Grants or revokes one permission for one role in this channel only
+    /// (a channel override on top of the role default). Owner/admin only.
+    /// Signed group event, replicated + audit-logged.
+    func setChannelPermission(
+        _ permission: GroupPermission,
+        granted: Bool,
+        for role: MemberRole,
+        conversationID: UUID
+    ) async throws
+    /// Clears a role's channel override, restoring role defaults.
+    /// Owner/admin only. Signed group event, replicated + audit-logged.
+    func resetChannelPermissions(for role: MemberRole, conversationID: UUID) async throws
+    /// Revokes the group's active invite: the current invite code stops
+    /// working immediately. Owner/admin only. Signed + audit-logged.
+    func revokeInvite(conversationID: UUID) async throws
+    /// Transfers ownership to another member; the current owner becomes an
+    /// admin. Only the owner can do this. Signed + audit-logged.
+    func transferOwnership(to contactID: UUID, conversationID: UUID) async throws
+    /// Suppresses presence signals (read receipts, typing indicators)
+    /// for a conversation. Used by the message-requests inbox: unknown
+    /// senders get no receipts/typing/online status until accepted, and
+    /// blocked contacts never get them.
+    func setPresenceSuppressed(_ suppressed: Bool, conversationID: UUID) async
+    /// The channel's current moderation snapshot for the settings UI.
+    func channelModerationSnapshot(conversationID: UUID) async -> ChannelModerationSnapshot?
+    /// Records a local-only signed audit entry (no replication to peers):
+    /// invite issued, join request declined, audit log exported. The entry
+    /// still chains into the local log and verifies like any other.
+    func noteLocalAuditEvent(kind: GroupAdminEventKind, conversationID: UUID, detail: String?) async
     func rotateSenderKey(conversationID: UUID) async throws
     func leaveConversation(_ conversationID: UUID) async throws
     /// Redeems an `aegis-group:` invite code: establishes a 1:1 session

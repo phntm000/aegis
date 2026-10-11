@@ -28,6 +28,8 @@ protocol StoreService: Sendable {
 
     /// Newest-first page; `before` pages backwards for infinite scroll.
     func fetchMessages(conversationID: UUID, limit: Int, before: Date?) async throws -> [Message]
+    /// Single message by ID (for jump-to-message, tombstone re-reads).
+    func fetchMessage(id: UUID, conversationID: UUID) async throws -> Message?
     func saveMessage(_ message: Message) async throws
     func updateMessage(_ message: Message) async throws
     func deleteMessage(id: UUID, conversationID: UUID) async throws
@@ -39,6 +41,12 @@ protocol StoreService: Sendable {
     /// the offline outbox. The app flushes these on launch and when
     /// connectivity returns.
     func pendingOutbox() async throws -> [Message]
+    /// All replies in a thread, oldest-first.
+    func fetchThreadReplies(conversationID: UUID, threadRootID: UUID) async throws -> [Message]
+    /// Per-thread stats (thread root ID -> reply count + last activity).
+    func fetchThreadSummaries(conversationID: UUID) async throws -> [UUID: ThreadSummary]
+    /// Locally starred messages, newest-first. Nil conversation = all chats.
+    func fetchStarredMessages(conversationID: UUID?) async throws -> [Message]
 
     // MARK: Contacts
 
