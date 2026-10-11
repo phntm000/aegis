@@ -35,7 +35,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
 
     private static let appGroupID = "group.app.aegis.ios"
     private static let frameFileName = "broadcast/latest.jpg"
-    private static let notificationName = "app.aegis.ios.broadcastframe" as CFString
+    private static let notificationName = "app.aegis.ios.broadcastframe"
     /// Max output dimension (720p). Keeps encode cost and file size sane.
     private static let maxDimension: CGFloat = 720
     /// Write at most ~10 fps; the call pipeline doesn't need more.
@@ -71,7 +71,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
             try? jpeg.write(to: url, options: .atomic)
             CFNotificationCenterPostNotification(
                 CFNotificationCenterGetDarwinNotifyCenter(),
-                Self.notificationName,
+                CFNotificationName(Self.notificationName as CFString),
                 nil,
                 nil,
                 true

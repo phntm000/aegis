@@ -703,7 +703,7 @@ final class SQLCipherStoreTests: XCTestCase {
         XCTAssertEqual(summaries.count, 1)
         XCTAssertEqual(summaries[parent.id]?.replyCount, 2)
         XCTAssertEqual(
-            summaries[parent.id]?.lastActivityAt.timeIntervalSince1970,
+            summaries[parent.id]?.lastActivityAt.timeIntervalSince1970 ?? -1,
             1_700_000_020, accuracy: 0.001
         )
     }
@@ -755,9 +755,12 @@ final class SQLCipherStoreTests: XCTestCase {
         try await store.messages.insert(kept)
         let listed = try await store.messages.disappearedMessages(now: Date())
         XCTAssertEqual(listed.map(\.id), [doomed.id])
-        XCTAssertEqual(try await store.messages.expungeDisappeared(now: Date()), 1)
-        XCTAssertNil(try await store.messages.fetch(id: doomed.id))
-        XCTAssertNotNil(try await store.messages.fetch(id: kept.id))
+        let expunged = try await store.messages.expungeDisappeared(now: Date())
+        XCTAssertEqual(expunged, 1)
+        let doomedAfter = try await store.messages.fetch(id: doomed.id)
+        XCTAssertNil(doomedAfter)
+        let keptAfter = try await store.messages.fetch(id: kept.id)
+        XCTAssertNotNil(keptAfter)
     }
 
     /// A v3 database (user_version=3, no v4 columns) migrates cleanly to

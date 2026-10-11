@@ -30,7 +30,7 @@ import WebRTCBridge
 enum BroadcastShare {
     static let appGroupID = "group.app.aegis.ios"
     static let frameFileName = "broadcast/latest.jpg"
-    static let notificationName = "app.aegis.ios.broadcastframe" as CFString
+    static let notificationName = "app.aegis.ios.broadcastframe"
 
     static var frameURL: URL? {
         FileManager.default
@@ -79,7 +79,7 @@ final class BroadcastFrameReader: @unchecked Sendable {
                         .takeUnretainedValue()
                         .readLatest()
                 },
-                BroadcastShare.notificationName,
+                CFNotificationName(BroadcastShare.notificationName as CFString),
                 nil,
                 .deliverImmediately
             )
@@ -93,7 +93,7 @@ final class BroadcastFrameReader: @unchecked Sendable {
             CFNotificationCenterRemoveObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(),
                 Unmanaged.passUnretained(self).toOpaque(),
-                BroadcastShare.notificationName,
+                CFNotificationName(BroadcastShare.notificationName as CFString),
                 nil
             )
         }
