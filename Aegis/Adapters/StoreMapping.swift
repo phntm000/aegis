@@ -326,8 +326,7 @@ enum StoreMapping {
                 levels: extra.levels,
                 wrappedKey: wrappedKey,
                 remoteLocator: pkg.remoteLocator,
-                localRelativePath: pkg.localRelativePath,
-                transcript: pkg.transcription
+                localRelativePath: pkg.localRelativePath
             )
             return (nil, note)
         }
@@ -425,15 +424,19 @@ enum StoreMapping {
         switch app {
         case .owner: return .owner
         case .admin: return .admin
+        case .moderator: return .moderator
         case .member: return .member
+        case .guest: return .guest
         }
     }
 
     static func memberRole(from pkg: AegisStore.MemberRole) -> MemberRole {
         switch pkg {
         case .owner: return .owner
-        case .admin, .moderator: return .admin
-        case .member, .guest: return .member
+        case .admin: return .admin
+        case .moderator: return .moderator
+        case .member: return .member
+        case .guest: return .guest
         }
     }
 }

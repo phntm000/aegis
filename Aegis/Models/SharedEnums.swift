@@ -1,3 +1,4 @@
+import AegisModeration
 import Foundation
 
 // MARK: - Shared domain enums
@@ -31,22 +32,67 @@ enum VerificationState: String, Sendable, Codable {
     case identityChanged
 }
 
-/// Role inside a group or channel.
+/// Role inside a group or channel. Raw values are the wire strings used in
+/// group control messages — they must stay stable.
 enum MemberRole: String, Sendable, Codable, CaseIterable {
     case owner
     case admin
+    case moderator
     case member
+    case guest
 
     var displayName: String {
         switch self {
         case .owner: return "Owner"
         case .admin: return "Admin"
+        case .moderator: return "Moderator"
         case .member: return "Member"
+        case .guest: return "Guest"
         }
     }
 
-    /// Whether this role may perform moderation actions.
+    /// Whether this role may administer the group: assign/revoke roles,
+    /// edit permissions, manage invites, edit group info. Owner/admin only.
+    /// (Existing call sites keep their behavior: moderators do NOT gain
+    /// admin powers through this flag.)
     var canModerate: Bool { self == .owner || self == .admin }
+
+    /// Whether this role may perform day-to-day moderation: remove members,
+    /// approve join requests, pin, manage slow mode. Owner/admin/moderator.
+    var canModerateMembers: Bool { canModerate || self == .moderator }
+
+    /// Lower rank = more privilege.
+    var rank: Int {
+        switch self {
+        case .owner: return 0
+        case .admin: return 1
+        case .moderator: return 2
+        case .member: return 3
+        case .guest: return 4
+        }
+    }
+
+    var moderationRole: ModerationRole {
+        switch self {
+        case .owner: return .owner
+        case .admin: return .admin
+        case .moderator: return .moderator
+        case .member: return .member
+        case .guest: return .guest
+        }
+    }
+}
+
+extension ModerationRole {
+    var memberRole: MemberRole {
+        switch self {
+        case .owner: return .owner
+        case .admin: return .admin
+        case .moderator: return .moderator
+        case .member: return .member
+        case .guest: return .guest
+        }
+    }
 }
 
 enum ConversationKind: String, Sendable, Codable {

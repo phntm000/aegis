@@ -85,7 +85,12 @@ extension Conversation {
     }
 
     /// Whether the local user may send into this conversation right now.
+    /// Guests are read-only observers and can never post; announcement-only
+    /// channels additionally require a moderating role. (The transport
+    /// layer re-checks this from the signed group state on every send —
+    /// this is the UI-facing projection, not the enforcement.)
     var canSend: Bool {
+        if let role = myRole, role == .guest { return false }
         guard kind != .channel || !isAnnouncementOnly else {
             return myRole?.canModerate ?? false
         }

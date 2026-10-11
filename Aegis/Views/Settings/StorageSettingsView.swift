@@ -25,7 +25,7 @@ struct StorageSettingsView: View {
                 } else if let usage = viewModel.storageUsage {
                     usageBar(usage)
                     usageRow(label: "Messages", bytes: usage.messagesBytes, color: AegisColors.accent)
-                    usageRow(label: "Attachments", bytes: usage.attachmentsBytes, color: AegisColors.purple)
+                    usageRow(label: "Attachments", bytes: usage.attachmentsBytes, color: Color.purple)
                     usageRow(label: "Voice notes", bytes: usage.voiceNotesBytes, color: AegisColors.success)
                     HStack {
                         Text("Total")
@@ -80,7 +80,7 @@ struct StorageSettingsView: View {
                     .fill(AegisColors.accent)
                     .frame(width: geometry.size.width * CGFloat(usage.messagesBytes) / CGFloat(total))
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(AegisColors.purple)
+                    .fill(Color.purple)
                     .frame(width: geometry.size.width * CGFloat(usage.attachmentsBytes) / CGFloat(total))
                 RoundedRectangle(cornerRadius: 3)
                     .fill(AegisColors.success)

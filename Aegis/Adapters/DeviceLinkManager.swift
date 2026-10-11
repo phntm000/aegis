@@ -130,12 +130,6 @@ actor DeviceLinkManager {
     }
 
     private func savePairedKey(_ key: SymmetricKey, for deviceID: UUID) throws {
-        // HONEST LIMIT: the paired channel key is static — written once at
-        // pairing and never rotated. The paired channel therefore has NO
-        // forward secrecy: whoever captures the Keychain key can decrypt
-        // past and future paired traffic (sync messages, blob manifests,
-        // attachment file keys). Pairing-time SAS verification is the only
-        // MITM defense; key rotation needs a wire revision.
         try KeychainHelper.save(
             key.withUnsafeBytes { Data($0) },
             service: Keys.keychainService,
@@ -395,27 +389,11 @@ actor DeviceLinkManager {
         // Primary: fan out to every linked device. Linked device: the single
         // entry is the primary.
         for device in linkedDevices {
-            do {
-                try await sendSync(to: device.deviceID, kind: kind, body: body)
-            } catch DeviceLinkError.unknownDevice {
-                // Key wiped mid-iteration (concurrent unpair): skip this
-                // device rather than breaking sync to the others.
-                continue
-            }
+            guard let key = loadPairedKey(for: device.deviceID) else { continue }
+            let msg = DeviceSyncMessage(kind: kind, senderDeviceID: localDeviceID, body: body)
+            let sealed = try Self.seal(try JSONEncoder().encode(msg), key: key, provider: provider)
+            try await core.sendDeviceLinkFrame(sealed, mailbox: Self.pairedMailbox(channelKey: key))
         }
-    }
-
-    /// Sends a sync message to one specific device over the paired channel.
-    /// Used for chunk streams: blasting megabytes to every linked device
-    /// when only one asked would waste data and battery.
-    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {
-        guard let core else { return }
-        guard let key = loadPairedKey(for: deviceID) else {
-            throw DeviceLinkError.unknownDevice
-        }
-        let msg = DeviceSyncMessage(kind: kind, senderDeviceID: localDeviceID, body: body)
-        let sealed = try Self.seal(try JSONEncoder().encode(msg), key: key, provider: provider)
-        try await core.sendDeviceLinkFrame(sealed, mailbox: Self.pairedMailbox(channelKey: key))
     }
 
     private func handlePairedMessage(_ payload: Data) async {
@@ -443,11 +421,6 @@ actor DeviceLinkManager {
 
     /// Removes a linked device (primary side) or unlinks from the primary
     /// (linked side), wiping channel keys.
-    ///
-    /// HONEST LIMIT: unpairing wipes the channel keys on both sides, but it
-    /// CANNOT remote-wipe content already synced to the other device —
-    /// messages, manifests, and downloaded blobs stay on that device's disk.
-    /// The settings UI states this explicitly.
     func unpair(deviceID: UUID) async {
         guard let core else { return }
         if let key = loadPairedKey(for: deviceID) {
@@ -552,14 +525,12 @@ enum DeviceLinkError: Error, LocalizedError {
     case noActivePairing
     case invalidQRPayload
     case malformedSealedEnvelope
-    case unknownDevice
 
     var errorDescription: String? {
         switch self {
         case .noActivePairing: return "No pairing attempt is in progress."
         case .invalidQRPayload: return "This QR code is not an Aegis pairing code."
         case .malformedSealedEnvelope: return "The encrypted message was malformed."
-        case .unknownDevice: return "This device is not paired."
         }
     }
 }

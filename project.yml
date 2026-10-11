@@ -29,8 +29,8 @@ packages:
     path: Packages/AegisStore
   WebRTCBridge:
     path: Packages/WebRTCBridge
-  AegisDeviceLink:
-    path: Packages/AegisDeviceLink
+  AegisModeration:
+    path: Packages/AegisModeration
 
 targets:
   Aegis:
@@ -53,12 +53,12 @@ targets:
       - package: AegisStore
         products:
           - AegisStore
-      - package: AegisDeviceLink
-        products:
-          - AegisDeviceLink
       - package: WebRTCBridge
         products:
           - WebRTCBridge
+      - package: AegisModeration
+        products:
+          - AegisModeration
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios
@@ -90,6 +90,9 @@ targets:
       - package: WebRTCBridge
         products:
           - WebRTCBridge
+      - package: AegisModeration
+        products:
+          - AegisModeration
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.aegis.ios.tests

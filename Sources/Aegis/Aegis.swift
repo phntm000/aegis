@@ -1,10 +1,9 @@
-// Aegis umbrella module: re-exports the library packages so
+// Aegis umbrella module: re-exports the three library packages so
 // consumers can `import Aegis` instead of importing each package.
 
 @_exported import AegisCrypto
 @_exported import AegisTransport
 @_exported import AegisStore
-@_exported import AegisDeviceLink
 
 /// Umbrella namespace for the Aegis client libraries.
 public enum Aegis {

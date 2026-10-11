@@ -78,12 +78,7 @@ struct ConversationRowView: View {
         }
         .padding(.vertical, AegisLayout.xs)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(conversation.title)\(unreadSuffix), \(conversation.lastMessagePreview ?? defaultPreview)")
-    }
-
-    /// Spoken unread count for the row's VoiceOver label; empty when none.
-    private var unreadSuffix: String {
-        conversation.unreadCount > 0 ? ", \(conversation.unreadCount) unread" : ""
+        .accessibilityLabel("\(conversation.title), \(conversation.lastMessagePreview ?? defaultPreview)")
     }
 
     private var defaultPreview: String {

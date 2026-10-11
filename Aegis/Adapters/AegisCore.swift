@@ -20,6 +20,7 @@
 // control) are decrypted by the core because the app has no API for them.
 
 import AegisCrypto
+import AegisModeration
 import AegisStore
 import AegisTransport
 import CryptoKit
@@ -30,6 +31,10 @@ import Security
 enum AegisCoreError: Error, LocalizedError {
     /// The local user is not a moderator of this group/channel.
     case notModerator
+    /// The local user's role lacks the granular permission for an action.
+    case notPermitted(String)
+    /// Slow mode blocked a send; the user may retry after the interval.
+    case slowModeLimited(retryAfter: TimeInterval)
     /// A malformed invite code was presented for redemption.
     case malformedInviteCode
     /// No group conversation matches the invite's group reference.
@@ -38,6 +43,9 @@ enum AegisCoreError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notModerator: return "Only admins can change group membership."
+        case .notPermitted(let what): return what
+        case .slowModeLimited(let retryAfter):
+            return "Slow mode is on — wait \(Int(retryAfter.rounded(.up)))s before posting again."
         case .malformedInviteCode: return "That invite code isn't valid."
         case .unknownInviteGroup: return "That invite is for a group this device doesn't know."
         }
@@ -75,7 +83,8 @@ struct GroupControlMessage: Codable, Sendable {
     var groupID: Data
     var epoch: UInt32
     /// "memberAdded" | "memberRemoved" | "roleChanged" | "topicChanged" |
-    /// "announcementModeChanged" | "blobRequest"
+    /// "announcementModeChanged" | "slowModeChanged" | "permissionChanged" |
+    /// "inviteRevoked" | "blobRequest"
     var kind: String
     var fingerprint: Data?
     var role: String?
@@ -93,6 +102,25 @@ struct GroupControlMessage: Codable, Sendable {
     var blobUploadID: String? = nil
     /// For "voiceRoom": JSON-encoded `VoiceRoomSignal`.
     var voiceRoomSignal: Data? = nil
+    /// For "slowModeChanged": new interval in seconds (nil = off).
+    var slowModeInterval: Double? = nil
+    /// For "permissionChanged": permission raw value, the new grant, and
+    /// the affected role's raw value. `permissionReset` clears the role's
+    /// channel override back to role defaults.
+    var permissionName: String? = nil
+    var permissionGranted: Bool? = nil
+    var permissionRole: String? = nil
+    var permissionReset: Bool? = nil
+    /// For moderation kinds ("slowModeChanged", "permissionChanged",
+    /// "inviteRevoked", "roleChanged", …): JSON-encoded `SignedGroupEvent`
+    /// replicating the actor's audit-log entry to every member.
+    var auditEvent: Data? = nil
+    /// For "inviteRevoked": the new invite generation. Invites embed the
+    /// generation they were issued at; older generations no longer redeem.
+    var inviteGeneration: Int? = nil
+    /// For "memberAdded": JSON-encoded `ChannelPermissionPolicy` so the
+    /// joiner adopts the current policy instead of role defaults.
+    var policy: Data? = nil
 }
 
 /// One roster entry in a membership announcement.
@@ -206,6 +234,13 @@ actor AegisCore {
     let pkgStore: any AegisDatabase
     let sidecars: ConversationSidecarStore
     let keyDirectory: ContactKeyDirectory
+    /// Per-conversation moderation state: permission policy, slow mode,
+    /// invite generations, and the signed audit log.
+    let moderation: GroupModerationStore
+    /// Conversations with presence signals suppressed (message-requests
+    /// inbox, blocked contacts): no read receipts or typing indicators
+    /// are emitted for these.
+    private var presenceSuppressedConversations: Set<UUID> = []
 
     // MARK: Transport
 
@@ -288,11 +323,12 @@ actor AegisCore {
         pkgStore: any AegisDatabase,
         sidecars: ConversationSidecarStore,
         keyDirectory: ContactKeyDirectory
-    ) {
+    ) throws {
         self.engine = engine
         self.pkgStore = pkgStore
         self.sidecars = sidecars
         self.keyDirectory = keyDirectory
+        self.moderation = try GroupModerationStore()
 
         let (cs, cc) = AsyncStream<ConnectionState>.makeStream()
         let (es, ec) = AsyncStream<IncomingEnvelope>.makeStream()
@@ -976,22 +1012,58 @@ actor AegisCore {
                 let control = try JSONDecoder().decode(GroupControlMessage.self, from: inner.body)
                 try await handleGroupControl(control, conversationID: conversationID, senderFingerprint: groupMessage.senderID)
             default:
-                // Announcement-only enforcement (inbound): a non-moderator's
-                // client should never send here (outbound is refused in
-                // sendCiphertext), but a modified client can. Recipients
-                // drop such messages rather than displaying them in a
-                // broadcast channel. Control messages are NOT gated here —
-                // each control kind carries its own authorization.
+                // Inbound group enforcement, from the signed channel policy:
+                // granular post permission + slow mode. A poster's client
+                // should never send here unauthorized (outbound is refused
+                // in sendCiphertext), but a modified client can — honest
+                // recipients drop such messages and record the bypass as an
+                // invalid event in the local audit log. Control messages are
+                // NOT gated here — each control kind carries its own
+                // authorization in handleGroupControl.
+                let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+                let posterRoleString = members.first(where: { $0.userID.rawValue == groupMessage.senderID.hexString })?.role
+                let posterRole: ModerationRole
+                switch posterRoleString {
+                case .owner: posterRole = .owner
+                case .admin: posterRole = .admin
+                case .moderator: posterRole = .moderator
+                case .guest: posterRole = .guest
+                default: posterRole = .member
+                }
+                // Legacy groups predate the policy store: converge the
+                // policy's announcement flag from the sidecar once.
                 let sidecar = await sidecars.load(id: conversationID)
-                if sidecar.isAnnouncementOnly == true {
-                    let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
-                    let posterRole = members.first(where: { $0.userID.rawValue == groupMessage.senderID.hexString })?.role
-                    let posterCanPost: Bool
-                    switch posterRole {
-                    case .owner, .admin, .moderator: posterCanPost = true
-                    default: posterCanPost = false
+                var modState = await moderation.load(id: conversationID)
+                if modState.policy.announcementOnly != sidecar.isAnnouncementOnly {
+                    let enabled = sidecar.isAnnouncementOnly
+                    try? await moderation.mutate(id: conversationID) {
+                        $0.policy.announcementOnly = enabled
                     }
-                    guard posterCanPost else { return }
+                    modState = await moderation.load(id: conversationID)
+                }
+                guard PermissionEvaluator.can(posterRole, .post, in: modState.policy) else {
+                    await recordInvalidEvent(
+                        conversationID: conversationID,
+                        groupID: groupID,
+                        targetFingerprint: groupMessage.senderID,
+                        detail: "Rejected a message from a member without post permission."
+                    )
+                    return
+                }
+                let senderKey = groupMessage.senderID.hexString
+                switch modState.slowMode.evaluate(memberKey: senderKey, role: posterRole, in: modState.policy) {
+                case .denied:
+                    await recordInvalidEvent(
+                        conversationID: conversationID,
+                        groupID: groupID,
+                        targetFingerprint: groupMessage.senderID,
+                        detail: "Rejected a message that violated slow mode."
+                    )
+                    return
+                case .allowed, .exempt:
+                    try? await moderation.mutate(id: conversationID) {
+                        $0.slowMode.recordSend(memberKey: senderKey)
+                    }
                 }
                 envelopeCont.yield(IncomingEnvelope(
                     id: UUID(),
@@ -1018,7 +1090,8 @@ actor AegisCore {
         // authoritative (see docs/THREAT_MODEL.md) — so a determined
         // attacker who socially engineers an admin role still wins; this
         // check only closes the trivial self-promotion hole.
-        let moderationKinds = ["memberAdded", "memberRemoved", "roleChanged", "topicChanged", "announcementModeChanged"]
+        let moderationKinds = ["memberAdded", "memberRemoved", "roleChanged", "topicChanged", "announcementModeChanged",
+                                 "slowModeChanged", "permissionChanged", "inviteRevoked"]
         if moderationKinds.contains(control.kind) {
             let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
             let senderRole = members.first(where: { $0.userID.rawValue == senderFingerprint.hexString })?.role
@@ -1060,6 +1133,18 @@ actor AegisCore {
                     try await pkgStore.memberships.remove(conversationID: cid, userID: AegisStore.UserID(fp.hexString))
                 }
             }
+            // A joiner adopts the announcer's current permission policy so
+            // their local enforcement matches the group's signed state from
+            // the start (instead of role defaults until the next change).
+            if control.kind == "memberAdded",
+               let policyData = control.policy,
+               let policy = try? JSONDecoder().decode(ChannelPermissionPolicy.self, from: policyData)
+            {
+                try? await moderation.mutate(id: conversationID) {
+                    $0.policy = policy
+                }
+            }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
         case "roleChanged":
             if let fp = control.fingerprint {
                 try await pkgStore.memberships.setRole(
@@ -1077,6 +1162,53 @@ actor AegisCore {
                     try await sidecars.save(id: conversationID, sidecar: sidecar)
                 }
             }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
+        case "announcementModeChanged":
+            // Keep the moderation policy's announcement flag in sync with
+            // the sidecar so the granular post check sees one truth.
+            if let enabled = control.announcementOnly {
+                var sidecar = await sidecars.load(id: conversationID)
+                sidecar.isAnnouncementOnly = enabled
+                try? await sidecars.save(id: conversationID, sidecar: sidecar)
+                try? await moderation.mutate(id: conversationID) {
+                    $0.policy.announcementOnly = enabled
+                }
+            }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
+        case "slowModeChanged":
+            let interval = control.slowModeInterval.map { TimeInterval($0) }
+            try? await moderation.mutate(id: conversationID) {
+                $0.policy.slowModeInterval = interval
+                if interval == nil { $0.slowMode.resetAll() }
+            }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
+        case "permissionChanged":
+            if let roleString = control.permissionRole,
+               let role = ModerationRole(rawValue: roleString)
+            {
+                try? await moderation.mutate(id: conversationID) { state in
+                    if control.permissionReset == true {
+                        state.policy.overrides.removeValue(forKey: role)
+                    } else if let name = control.permissionName,
+                              let permission = GroupPermission(rawValue: name),
+                              let granted = control.permissionGranted
+                    {
+                        var grants = state.policy.overrides[role] ?? PermissionEvaluator.defaultGrants(for: role)
+                        if granted { grants.insert(permission) } else { grants.remove(permission) }
+                        state.policy.overrides[role] = grants
+                    }
+                }
+            }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
+        case "inviteRevoked":
+            if let generation = control.inviteGeneration {
+                try? await moderation.mutate(id: conversationID) { state in
+                    state.inviteGeneration = max(state.inviteGeneration, generation)
+                }
+            }
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
+        case "topicChanged":
+            await appendReceivedAuditEvent(conversationID: conversationID, control: control)
         case "blobRequest":
             // A member missed some (or all) chunks of a blob we uploaded.
             // Re-transmit from the sent-blob cache; the downloader merges
@@ -1112,6 +1244,8 @@ actor AegisCore {
         case "roleChanged": kind = .roleChanged
         case "topicChanged": kind = .topicChanged
         case "announcementModeChanged": kind = .announcementModeChanged
+        case "slowModeChanged": kind = .slowModeChanged
+        case "permissionChanged": kind = .permissionsChanged
         default:
             // Non-membership controls (e.g. "blobRequest") are fully
             // handled above; there is no UI event to emit.
@@ -1123,7 +1257,8 @@ actor AegisCore {
             memberKey: control.fingerprint,
             role: control.role.flatMap { appRoleFromString($0) },
             topic: control.kind == "topicChanged" ? control.topic : nil,
-            announcementOnly: control.announcementOnly
+            announcementOnly: control.announcementOnly,
+            slowModeInterval: control.slowModeInterval.map { TimeInterval($0) }
         ))
     }
 
@@ -1250,18 +1385,40 @@ actor AegisCore {
         kind: EnvelopeKind,
         flags: UInt8 = 0
     ) async throws {
-        // Announcement-only (broadcast) enforcement, outbound: only
-        // moderators may post user messages to an announcement channel.
-        // (Control messages — membership, topic — always flow; they are
-        // separately gated by the moderation checks in the group ops.)
-        // The composer UI already hides the input for non-admins; this is
-        // the backstop so a UI bug can't leak a post.
+        // Outbound group enforcement, from the signed channel policy:
+        // granular post permission + slow mode. (Control messages —
+        // membership, topic, moderation — always flow; they carry their own
+        // authorization in the group ops below.) The composer UI already
+        // hides the input for unauthorized roles; this is the backstop so
+        // a UI bug can't leak a post, and so a modified client is visible
+        // as an invalid event to honest recipients.
         if kind == .message {
             let sidecar = await sidecars.load(id: conversationID)
-            if sidecar.cryptoGroupID != nil, sidecar.isAnnouncementOnly == true,
-               sidecar.myRole?.canModerate != true
-            {
-                throw AegisCoreError.notModerator
+            if sidecar.cryptoGroupID != nil {
+                // Legacy groups predate the policy store: converge the
+                // policy's announcement flag from the sidecar once.
+                var state = await moderation.load(id: conversationID)
+                if state.policy.announcementOnly != sidecar.isAnnouncementOnly {
+                    let enabled = sidecar.isAnnouncementOnly
+                    try? await moderation.mutate(id: conversationID) {
+                        $0.policy.announcementOnly = enabled
+                    }
+                    state = await moderation.load(id: conversationID)
+                }
+                let myRole = (sidecar.myRole ?? .member).moderationRole
+                guard PermissionEvaluator.can(myRole, .post, in: state.policy) else {
+                    throw AegisCoreError.notPermitted("You don't have permission to post in this channel.")
+                }
+                let localFP = try? await engine.localPublicIdentity().fingerprint
+                let memberKey = localFP?.hexString ?? "local"
+                switch state.slowMode.evaluate(memberKey: memberKey, role: myRole, in: state.policy) {
+                case .allowed, .exempt:
+                    try? await moderation.mutate(id: conversationID) {
+                        $0.slowMode.recordSend(memberKey: memberKey)
+                    }
+                case .denied(let retryAfter):
+                    throw AegisCoreError.slowModeLimited(retryAfter: retryAfter)
+                }
             }
         }
         let (mailbox, policy) = try await mailboxForConversation(conversationID, kind: kind)
@@ -1338,6 +1495,11 @@ actor AegisCore {
         sidecar.subtitle = topic
         sidecar.myRole = .owner
         try await sidecars.save(id: conversationID, sidecar: sidecar)
+        // The moderation policy mirrors announcement mode so the granular
+        // post check sees the same truth as the sidecar-fed UI.
+        try? await moderation.mutate(id: conversationID) {
+            $0.policy.announcementOnly = announcementOnly
+        }
         try await bindGroup(groupID: groupID, conversationID: conversationID)
         // Membership rows for the roster UI.
         if let local = try? await engine.localPublicIdentity() {
@@ -1476,10 +1638,28 @@ actor AegisCore {
         let prefix = "aegis-group:"
         guard trimmed.hasPrefix(prefix) else { throw AegisCoreError.malformedInviteCode }
         let rest = trimmed.dropFirst(prefix.count)
-        guard let separator = rest.firstIndex(of: ":") else { throw AegisCoreError.malformedInviteCode }
-        let groupReference = String(rest[..<separator])
-        guard UUID(uuidString: groupReference) != nil else { throw AegisCoreError.malformedInviteCode }
-        let invitePayload = String(rest[rest.index(after: separator)...])
+        // Format: aegis-group:<conversation UUID>:[<generation>:]<invite payload>.
+        // New invites carry a pure-digit generation segment right after the
+        // UUID (0 for the first generation); legacy codes omit it. The
+        // payload itself always starts with a scheme marker ("AEGIS1",
+        // "aegis-invite-"), never bare digits, so the two forms are
+        // unambiguous.
+        let components = rest.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        var inviteGeneration: Int? = nil
+        var payloadStart = 1
+        if components.count >= 3,
+           !components[1].isEmpty,
+           components[1].allSatisfy(\.isNumber),
+           let generation = Int(components[1])
+        {
+            inviteGeneration = generation
+            payloadStart = 2
+        }
+        guard components.count > payloadStart,
+              UUID(uuidString: components[0]) != nil
+        else { throw AegisCoreError.malformedInviteCode }
+        let groupReference = components[0]
+        let invitePayload = components[payloadStart...].joined(separator: ":")
         guard !invitePayload.isEmpty else { throw AegisCoreError.malformedInviteCode }
         // parseInvite caches the inviter's prekey bundle, so encryptDirect
         // below can establish the 1:1 session from the code alone.
@@ -1488,6 +1668,7 @@ actor AegisCore {
         var payload = WirePayload(kind: .groupJoinRequest)
         payload.joinGroupReference = groupReference
         payload.joinRequesterName = displayName
+        payload.joinInviteGeneration = inviteGeneration
         let inner = try await engine.encryptDirect(try payload.encoded(), to: inviter)
         let mailbox = try await engine.directRoutingMailbox(peer: inviter)
         // No session exists yet on the inviter's side: this lands on their
@@ -1528,12 +1709,20 @@ actor AegisCore {
         let displayName = await resolveContactName(for: peer.fingerprint) ?? ""
         roster[peer.fingerprint.hexString] = GroupRosterEntry(
             identityKey: peer.serialized(), displayName: displayName, role: "member")
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .memberAdded,
+            targetFingerprint: peer.fingerprint,
+            targetDisplayName: displayName.isEmpty ? nil : displayName,
+            detail: "Invited to the group."
+        )
         try await sendGroupControl(
             conversationID: conversationID, groupID: groupID,
             message: GroupControlMessage(
                 groupID: groupID, epoch: newEpoch, kind: "memberAdded",
                 fingerprint: peer.fingerprint, role: "member",
-                memberIdentityKey: peer.serialized(), roster: roster),
+                memberIdentityKey: peer.serialized(), roster: roster,
+                auditEvent: audit, policy: await encodedPolicy(conversationID: conversationID)),
             onMailboxes: oldMailboxes)
         // 2. Bump locally.
         let distributions = try await engine.updateGroupMembership(groupID: groupID, add: [peer], remove: [])
@@ -1614,11 +1803,17 @@ actor AegisCore {
         // 1. Announce first: the roster WITHOUT the removed member.
         var roster = await fullRoster(conversationID: conversationID)
         roster.removeValue(forKey: fingerprint.hexString)
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .memberRemoved,
+            targetFingerprint: fingerprint,
+            detail: "Removed from the group."
+        )
         try await sendGroupControl(
             conversationID: conversationID, groupID: groupID,
             message: GroupControlMessage(
                 groupID: groupID, epoch: newEpoch, kind: "memberRemoved",
-                fingerprint: fingerprint, roster: roster),
+                fingerprint: fingerprint, roster: roster, auditEvent: audit),
             onMailboxes: oldMailboxes)
         // 2. Bump locally.
         let distributions = try await engine.updateGroupMembership(groupID: groupID, add: [], remove: [fingerprint])
@@ -1629,6 +1824,375 @@ actor AegisCore {
         )
         // 3. Fresh keys to the remaining members only.
         try await distribute(distributions)
+    }
+
+    // MARK: - Group moderation (permissions, slow mode, invites, audit log)
+
+    /// The audit-log crypto wiring: SHA-256 chain hash, Ed25519
+    /// identity-key signatures. Private key material never leaves the
+    /// crypto engine — `sign` only crosses the boundary as a closure.
+    private func auditCrypto() -> AuditCrypto {
+        AuditCrypto(
+            hash: { data in
+                var hasher = SHA256()
+                hasher.update(data: data)
+                return Data(hasher.finalize())
+            },
+            sign: { [engine] digest in try await engine.signWithIdentity(digest) },
+            verify: { digest, signature, publicKey in
+                Ed25519KeyPair.verify(signature: signature, for: digest, publicKey: publicKey)
+            }
+        )
+    }
+
+    /// Fingerprint → Ed25519 public key for every roster member (plus us),
+    /// used to verify replicated audit entries.
+    private func auditActorKeys(conversationID: UUID) async -> [Data: Data] {
+        let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+        var keys: [Data: Data] = [:]
+        for member in members {
+            guard let fp = Data(hexString: member.userID.rawValue),
+                  let identity = await engine.identityPublic(forFingerprint: fp)
+            else { continue }
+            keys[fp] = identity.signingPublicKey
+        }
+        if let local = try? await engine.localPublicIdentity() {
+            keys[local.fingerprint] = local.signingPublicKey
+        }
+        return keys
+    }
+
+    private func makeAuditEvent(
+        kind: GroupAdminEventKind,
+        groupID: Data,
+        targetFingerprint: Data? = nil,
+        targetDisplayName: String? = nil,
+        detail: String? = nil
+    ) async -> GroupAdminEvent? {
+        guard let local = try? await engine.localPublicIdentity() else { return nil }
+        return GroupAdminEvent(
+            kind: kind,
+            groupID: groupID,
+            actorFingerprint: local.fingerprint,
+            actorDisplayName: await engine.displayName(),
+            targetFingerprint: targetFingerprint,
+            targetDisplayName: targetDisplayName,
+            detail: detail
+        )
+    }
+
+    /// Appends a signed audit entry for OUR OWN admin action. Returns the
+    /// JSON-encoded `SignedGroupEvent` for replication inside the group
+    /// control message (nil when signing/storage failed — the control
+    /// still goes out; the local log records the action on retry).
+    func recordAdminAction(
+        conversationID: UUID,
+        kind: GroupAdminEventKind,
+        targetFingerprint: Data? = nil,
+        targetDisplayName: String? = nil,
+        detail: String? = nil
+    ) async -> Data? {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID,
+              let event = await makeAuditEvent(
+                  kind: kind, groupID: groupID,
+                  targetFingerprint: targetFingerprint,
+                  targetDisplayName: targetDisplayName,
+                  detail: detail
+              )
+        else { return nil }
+        var state = await moderation.load(id: conversationID)
+        do {
+            try await state.auditLog.append(event, crypto: auditCrypto())
+        } catch {
+            return nil
+        }
+        try? await moderation.save(id: conversationID, state: state)
+        return try? JSONEncoder().encode(state.auditLog.events.last)
+    }
+
+    /// Records a peer's policy violation observed by this honest client
+    /// (e.g. slow-mode bypass, unauthorized post). Signed by us as the
+    /// observer; the entry lives in our local log.
+    private func recordInvalidEvent(
+        conversationID: UUID,
+        groupID: Data,
+        targetFingerprint: Data,
+        detail: String
+    ) async {
+        guard let event = await makeAuditEvent(
+            kind: .invalidEventObserved, groupID: groupID,
+            targetFingerprint: targetFingerprint, detail: detail
+        ) else { return }
+        var state = await moderation.load(id: conversationID)
+        try? await state.auditLog.append(event, crypto: auditCrypto())
+        try? await moderation.save(id: conversationID, state: state)
+    }
+
+    /// Appends a peer's replicated audit entry after verifying its
+    /// signature and chain position. Gaps and forgeries are rejected —
+    /// the local log never accepts an entry it cannot verify.
+    private func appendReceivedAuditEvent(conversationID: UUID, control: GroupControlMessage) async {
+        guard let data = control.auditEvent,
+              let entry = try? JSONDecoder().decode(SignedGroupEvent.self, from: data)
+        else { return }
+        var state = await moderation.load(id: conversationID)
+        let keys = await auditActorKeys(conversationID: conversationID)
+        let result = state.auditLog.appendReceived(entry, crypto: auditCrypto(), actorKeys: keys)
+        guard case .ok = result else {
+            #if DEBUG
+            print("[Aegis] Rejected replicated audit entry: \(result)")
+            #endif
+            return
+        }
+        try? await moderation.save(id: conversationID, state: state)
+    }
+
+    /// Keeps the moderation policy's announcement flag in sync with the
+    /// sidecar (the sidecar feeds the existing UI paths).
+    func syncAnnouncementPolicy(_ enabled: Bool, conversationID: UUID) async {
+        try? await moderation.mutate(id: conversationID) {
+            $0.policy.announcementOnly = enabled
+        }
+    }
+
+    /// Sets the channel's slow-mode interval (nil = off). Owner/admin only.
+    /// A signed group event, replicated to members and audit-logged.
+    func setSlowMode(_ interval: TimeInterval?, conversationID: UUID) async throws {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        let clamped = interval.map {
+            min(max($0, SlowModeEnforcer.minimumInterval), SlowModeEnforcer.maximumInterval)
+        }
+        try? await moderation.mutate(id: conversationID) {
+            $0.policy.slowModeInterval = clamped
+            if clamped == nil { $0.slowMode.resetAll() }
+        }
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .slowModeChanged,
+            detail: clamped.map { "Slow mode set to \(SlowModeEnforcer.label(for: $0))." }
+                ?? "Slow mode turned off."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID,
+                epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+                kind: "slowModeChanged",
+                slowModeInterval: clamped,
+                auditEvent: audit
+            )
+        )
+        groupCont.yield(GroupEvent(
+            conversationID: conversationID,
+            kind: .slowModeChanged,
+            slowModeInterval: clamped
+        ))
+    }
+
+    /// Grants/revokes one permission for one role in this channel only.
+    /// Owner/admin only. Signed group event, replicated + audit-logged.
+    func setChannelPermission(
+        _ permission: GroupPermission,
+        granted: Bool,
+        for role: MemberRole,
+        conversationID: UUID
+    ) async throws {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        let modRole = role.moderationRole
+        try? await moderation.mutate(id: conversationID) { state in
+            var grants = state.policy.overrides[modRole] ?? PermissionEvaluator.defaultGrants(for: modRole)
+            if granted { grants.insert(permission) } else { grants.remove(permission) }
+            state.policy.overrides[modRole] = grants
+        }
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .permissionChanged,
+            detail: "\(permission.displayName) \(granted ? "granted to" : "revoked from") \(modRole.displayName)s."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID,
+                epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+                kind: "permissionChanged",
+                permissionName: permission.rawValue,
+                permissionGranted: granted,
+                permissionRole: modRole.rawValue,
+                auditEvent: audit
+            )
+        )
+        groupCont.yield(GroupEvent(conversationID: conversationID, kind: .permissionsChanged))
+    }
+
+    /// Clears a role's channel permission override, restoring role
+    /// defaults. Owner/admin only. Signed group event, replicated +
+    /// audit-logged.
+    func resetChannelPermissions(for role: MemberRole, conversationID: UUID) async throws {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        let modRole = role.moderationRole
+        try? await moderation.mutate(id: conversationID) { state in
+            state.policy.overrides.removeValue(forKey: modRole)
+        }
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .permissionChanged,
+            detail: "\(modRole.displayName) permissions reset to role defaults."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID,
+                epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+                kind: "permissionChanged",
+                permissionRole: modRole.rawValue,
+                permissionReset: true,
+                auditEvent: audit
+            )
+        )
+        groupCont.yield(GroupEvent(conversationID: conversationID, kind: .permissionsChanged))
+    }
+
+    /// Revokes the group's active invite: the generation bumps, and join
+    /// requests referencing older generations are declined. Owner/admin
+    /// only. Signed + audit-logged.
+    func revokeInvite(conversationID: UUID) async throws {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        var generation = 0
+        try? await moderation.mutate(id: conversationID) { state in
+            state.inviteGeneration += 1
+            generation = state.inviteGeneration
+        }
+        let audit = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .inviteRevoked,
+            detail: "Invite revoked."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID,
+                epoch: await engine.groupEpoch(groupID: groupID) ?? 0,
+                kind: "inviteRevoked",
+                inviteGeneration: generation,
+                auditEvent: audit
+            )
+        )
+    }
+
+    /// Transfers ownership to another member; the current owner becomes an
+    /// admin. Only the owner can do this. Signed + audit-logged.
+    func transferOwnership(to fingerprint: Data, conversationID: UUID) async throws {
+        let sidecar = await sidecars.load(id: conversationID)
+        guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
+        guard sidecar.myRole == .owner else { throw AegisCoreError.notModerator }
+        guard let local = try? await engine.localPublicIdentity(),
+              fingerprint != local.fingerprint
+        else {
+            throw AegisCoreError.notPermitted("You already own this group.")
+        }
+        let members = (try? await pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+        guard members.contains(where: { $0.userID.rawValue == fingerprint.hexString }) else {
+            throw AegisCoreError.notPermitted("That member is not in this group.")
+        }
+        let epoch = await engine.groupEpoch(groupID: groupID) ?? 0
+        // Promote first, demote second: the group is never ownerless on
+        // any honest client's screen.
+        try await pkgStore.memberships.setRole(
+            conversationID: packageID(conversationID),
+            userID: AegisStore.UserID(fingerprint.hexString),
+            role: .owner
+        )
+        let auditNew = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .ownershipTransferred,
+            targetFingerprint: fingerprint,
+            detail: "Ownership transferred."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID, epoch: epoch, kind: "roleChanged",
+                fingerprint: fingerprint, role: "owner", auditEvent: auditNew
+            )
+        )
+        try await pkgStore.memberships.setRole(
+            conversationID: packageID(conversationID),
+            userID: AegisStore.UserID(local.fingerprint.hexString),
+            role: .admin
+        )
+        var updated = await sidecars.load(id: conversationID)
+        updated.myRole = .admin
+        try? await sidecars.save(id: conversationID, sidecar: updated)
+        let auditSelf = await recordAdminAction(
+            conversationID: conversationID,
+            kind: .roleChanged,
+            targetFingerprint: local.fingerprint,
+            detail: "Previous owner demoted to admin."
+        )
+        try await sendGroupControl(
+            conversationID: conversationID, groupID: groupID,
+            message: GroupControlMessage(
+                groupID: groupID, epoch: epoch, kind: "roleChanged",
+                fingerprint: local.fingerprint, role: "admin", auditEvent: auditSelf
+            )
+        )
+        groupCont.yield(GroupEvent(
+            conversationID: conversationID, kind: .roleChanged,
+            memberKey: fingerprint, role: .owner
+        ))
+    }
+
+    /// The channel's moderation snapshot for the settings UI.
+    func moderationSnapshot(conversationID: UUID) async -> ChannelModerationSnapshot {
+        let state = await moderation.load(id: conversationID)
+        let keys = await auditActorKeys(conversationID: conversationID)
+        let verification = state.auditLog.verify(with: auditCrypto(), actorKeys: keys)
+        let myRole = await sidecars.load(id: conversationID).myRole
+        return ChannelModerationSnapshot(
+            policy: state.policy,
+            auditEvents: state.auditLog.events,
+            auditVerification: verification,
+            myRole: myRole,
+            inviteGeneration: state.inviteGeneration
+        )
+    }
+
+    /// Records a local-only signed audit entry (see TransportService).
+    func noteLocalAuditEvent(kind: GroupAdminEventKind, conversationID: UUID, detail: String?) async {
+        _ = await recordAdminAction(
+            conversationID: conversationID, kind: kind, detail: detail
+        )
+    }
+
+    /// Presence suppression for the message-requests inbox and blocklist:
+    /// while suppressed, no read receipts or typing indicators go out on
+    /// this conversation.
+    func setPresenceSuppressed(_ suppressed: Bool, conversationID: UUID) {
+        if suppressed {
+            presenceSuppressedConversations.insert(conversationID)
+        } else {
+            presenceSuppressedConversations.remove(conversationID)
+        }
+    }
+
+    func isPresenceSuppressed(conversationID: UUID) -> Bool {
+        presenceSuppressedConversations.contains(conversationID)
+    }
+
+    /// Encoded channel policy for inclusion in member-added announcements
+    /// so joiners adopt the current policy instead of defaults.
+    func encodedPolicy(conversationID: UUID) async -> Data? {
+        let state = await moderation.load(id: conversationID)
+        return try? JSONEncoder().encode(state.policy)
     }
 
     /// Sends a group control message. When `onMailboxes` is given, the
@@ -2182,7 +2746,9 @@ actor AegisCore {
     private func appRoleFromString(_ role: String) -> MemberRole? {
         switch role {
         case "owner": return .owner
-        case "admin", "moderator": return .admin
+        case "admin": return .admin
+        case "moderator": return .moderator
+        case "guest": return .guest
         default: return .member
         }
     }

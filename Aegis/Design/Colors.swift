@@ -40,8 +40,6 @@ enum AegisColors {
     static let success = dynamic(light: 0x1E9E57, dark: 0x3ED598)
     static let warning = dynamic(light: 0xB7791F, dark: 0xE5A83B)
     static let danger = dynamic(light: 0xD64545, dark: 0xF26D6D)
-    /// Secondary categorical hue (storage charts, settings iconography).
-    static let purple = dynamic(light: 0x7C4DFF, dark: 0xA78BFA)
 
     // MARK: - Chat
 

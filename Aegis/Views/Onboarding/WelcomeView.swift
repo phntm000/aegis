@@ -50,7 +50,6 @@ struct WelcomeView: View {
             }
             .font(AegisType.callout)
             .foregroundStyle(AegisColors.accent)
-            .frame(minHeight: AegisLayout.minTapTarget)
             .padding(.top, AegisLayout.s)
             .accessibilityLabel("Link this device to an existing Aegis device")
         }

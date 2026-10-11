@@ -1,3 +1,4 @@
+import AegisModeration
 import AegisTransport
 import Foundation
 
@@ -127,7 +128,6 @@ struct MockDeviceLink: DeviceLinkService {
         throw PreviewServiceError.noIdentity
     }
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {}
-    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {}
     func unpair(deviceID: UUID) async {}
 }
 
@@ -238,11 +238,6 @@ actor MockCrypto: CryptoService {
         try? FileManager.default.removeItem(at: destinationURL)
         try FileManager.default.copyItem(at: ciphertextURL, to: destinationURL)
     }
-
-    // Previews have no conversation keys: linked-device blob sync is
-    // unavailable in previews (the UI shows the honest "primary device"
-    // limitation instead).
-    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? { nil }
 
     // MARK: Backup
 
@@ -437,6 +432,64 @@ actor MockTransport: TransportService {
     func leaveConversation(_ conversationID: UUID) async throws {}
     func requestGroupJoin(code: String) async throws {}
     func approveJoinRequest(_ request: JoinRequest) async throws {}
+
+    // MARK: Moderation (preview: in-memory, no signatures)
+
+    private var channelPolicies: [UUID: ChannelPermissionPolicy] = [:]
+    private var inviteGenerations: [UUID: Int] = [:]
+    private var presenceSuppressed: Set<UUID> = []
+
+    func setSlowMode(_ interval: TimeInterval?, conversationID: UUID) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        policy.slowModeInterval = interval
+        channelPolicies[conversationID] = policy
+    }
+
+    func setChannelPermission(
+        _ permission: GroupPermission,
+        granted: Bool,
+        for role: MemberRole,
+        conversationID: UUID
+    ) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        let modRole = role.moderationRole
+        var grants = policy.overrides[modRole] ?? PermissionEvaluator.defaultGrants(for: modRole)
+        if granted { grants.insert(permission) } else { grants.remove(permission) }
+        policy.overrides[modRole] = grants
+        channelPolicies[conversationID] = policy
+    }
+
+    func revokeInvite(conversationID: UUID) async throws {
+        inviteGenerations[conversationID, default: 0] += 1
+    }
+
+    func resetChannelPermissions(for role: MemberRole, conversationID: UUID) async throws {
+        var policy = channelPolicies[conversationID] ?? .default()
+        policy.overrides.removeValue(forKey: role.moderationRole)
+        channelPolicies[conversationID] = policy
+    }
+
+    func transferOwnership(to contactID: UUID, conversationID: UUID) async throws {}
+
+    func setPresenceSuppressed(_ suppressed: Bool, conversationID: UUID) async {
+        if suppressed {
+            presenceSuppressed.insert(conversationID)
+        } else {
+            presenceSuppressed.remove(conversationID)
+        }
+    }
+
+    func channelModerationSnapshot(conversationID: UUID) async -> ChannelModerationSnapshot? {
+        ChannelModerationSnapshot(
+            policy: channelPolicies[conversationID] ?? .default(),
+            auditEvents: [],
+            auditVerification: .empty,
+            myRole: .owner,
+            inviteGeneration: inviteGenerations[conversationID] ?? 0
+        )
+    }
+
+    func noteLocalAuditEvent(kind: GroupAdminEventKind, conversationID: UUID, detail: String?) async {}
 
     // MARK: Identity-change tracking (preview: not simulated)
 

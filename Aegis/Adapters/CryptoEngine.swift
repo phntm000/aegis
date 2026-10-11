@@ -315,6 +315,16 @@ actor CryptoEngine {
 
     var hasIdentity: Bool { identity != nil }
 
+    /// Signs arbitrary data with the long-term identity (Ed25519) key.
+    /// Used for group audit-log entries: the signature binds an admin
+    /// action to the actor's identity so every member can verify it.
+    /// Private key material never leaves the engine — only the signature
+    /// crosses the boundary.
+    func signWithIdentity(_ data: Data) throws -> Data {
+        guard let identity else { throw CryptoEngineError.unknownSession }
+        return try identity.signingKey.sign(data)
+    }
+
     func loadIdentity() throws -> (IdentityPublic, String, Date) {
         guard let identity else { throw CryptoEngineError.unknownSession }
         return (identity.publicView, localDisplayName, identity.createdAt)

@@ -100,12 +100,11 @@ struct AppearanceSettingsView: View {
                             if appearanceRaw == mode.rawValue {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(AegisColors.accent)
-                                    .accessibilityHidden(true)
+                                    .accessibilityLabel("Selected")
                             }
                         }
                     }
                     .accessibilityLabel("\(mode.displayName) appearance")
-                    .accessibilityAddTraits(appearanceRaw == mode.rawValue ? .isSelected : [])
                 }
             } header: {
                 EmptyView()

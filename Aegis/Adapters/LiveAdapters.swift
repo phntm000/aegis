@@ -11,6 +11,7 @@
 // entire integration.
 
 import AegisCrypto
+import AegisModeration
 import AegisStore
 import AegisTransport
 import CryptoKit
@@ -217,14 +218,6 @@ struct LiveCryptoService: CryptoService {
         try AttachmentCrypto.decryptFile(at: ciphertextURL, key: SymmetricKey(data: fileKeyData), to: destinationURL)
     }
 
-    /// Raw file key for provisioning linked devices over the paired
-    /// channel. Reads the Keychain cache populated at send/receipt time
-    /// (see noteFileKey) — the wrapped key itself may no longer unwrap
-    /// after sender-key rotations, but the cached raw key stays valid.
-    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? {
-        await core.fileKey(forWrappedKey: wrappedKey)
-    }
-
     // MARK: Backup
 
     func exportEncryptedBackup(passphrase: String) async throws -> Data {
@@ -316,18 +309,28 @@ struct LiveTransportService: TransportService {
     }
 
     func sendTypingIndicator(conversationID: UUID, isTyping: Bool) async throws {
+        // Presence suppression (message-requests inbox, blocked contacts):
+        // unknown senders get no typing indicators until the request is
+        // accepted, blocked contacts never do.
+        guard await core.isPresenceSuppressed(conversationID: conversationID) == false else { return }
         var payload = WirePayload(kind: .typing)
         payload.isTyping = isTyping
         try await sendAppPayload(payload, conversationID: conversationID, kind: .typing)
     }
 
     func sendReadReceipt(conversationID: UUID, messageIDs: [UUID]) async throws {
+        // Same suppression as typing: no read receipts leak to request
+        // senders or blocked contacts.
+        guard await core.isPresenceSuppressed(conversationID: conversationID) == false else { return }
         var payload = WirePayload(kind: .readReceipt)
         payload.messageIDs = messageIDs
         try await sendAppPayload(payload, conversationID: conversationID, kind: .readReceipt)
     }
 
     func sendScreenshotNotice(conversationID: UUID) async throws {
+        // A screenshot notice reveals we're actively viewing — suppress it
+        // for requests and blocked contacts like any other presence signal.
+        guard await core.isPresenceSuppressed(conversationID: conversationID) == false else { return }
         let payload = WirePayload(kind: .screenshotNotice)
         try await sendAppPayload(payload, conversationID: conversationID, kind: .screenshotNotice)
     }
@@ -467,10 +470,26 @@ struct LiveTransportService: TransportService {
         let sidecar = await core.sidecars.load(id: conversationID)
         guard let groupID = sidecar.cryptoGroupID else { throw CryptoEngineError.unknownGroup }
         guard sidecar.myRole?.canModerate == true else { throw AegisCoreError.notModerator }
+        // Role hierarchy: you can only manage members strictly below you,
+        // and you can never grant a rank equal-or-above your own (ownership
+        // transfer is the sole exception, via transferOwnership).
+        let members = (try? await core.pkgStore.memberships.members(of: packageID(conversationID))) ?? []
+        let targetCurrent = members.first(where: { $0.userID.rawValue == peer.fingerprint.hexString })
+            .map { StoreMapping.memberRole(from: $0.role) } ?? .member
+        let myModRole = (sidecar.myRole ?? .member).moderationRole
+        guard myModRole.canManageRole(of: targetCurrent.moderationRole, assigning: role.moderationRole) else {
+            throw AegisCoreError.notPermitted("Your role can't assign \(role.displayName) to this member.")
+        }
         try await core.pkgStore.memberships.setRole(
             conversationID: packageID(conversationID),
             userID: AegisStore.UserID(peer.fingerprint.hexString),
             role: StoreMapping.memberRole(from: role)
+        )
+        let audit = await core.recordAdminAction(
+            conversationID: conversationID,
+            kind: .roleChanged,
+            targetFingerprint: peer.fingerprint,
+            detail: "Role changed to \(role.displayName)."
         )
         try await core.sendGroupControl(
             conversationID: conversationID, groupID: groupID,
@@ -479,7 +498,8 @@ struct LiveTransportService: TransportService {
                 epoch: await core.engine.groupEpoch(groupID: groupID) ?? 0,
                 kind: "roleChanged",
                 fingerprint: peer.fingerprint,
-                role: role.rawValue
+                role: role.rawValue,
+                auditEvent: audit
             )
         )
     }
@@ -491,13 +511,20 @@ struct LiveTransportService: TransportService {
         var updated = sidecar
         updated.isAnnouncementOnly = enabled
         try await core.sidecars.save(id: conversationID, sidecar: updated)
+        await core.syncAnnouncementPolicy(enabled, conversationID: conversationID)
+        let audit = await core.recordAdminAction(
+            conversationID: conversationID,
+            kind: .announcementModeChanged,
+            detail: enabled ? "Channel set to announcement-only." : "Announcement-only turned off."
+        )
         try await core.sendGroupControl(
             conversationID: conversationID, groupID: groupID,
             message: GroupControlMessage(
                 groupID: groupID,
                 epoch: await core.engine.groupEpoch(groupID: groupID) ?? 0,
                 kind: "announcementModeChanged",
-                announcementOnly: enabled
+                announcementOnly: enabled,
+                auditEvent: audit
             )
         )
     }
@@ -509,15 +536,59 @@ struct LiveTransportService: TransportService {
         var updated = sidecar
         updated.subtitle = topic
         try await core.sidecars.save(id: conversationID, sidecar: updated)
+        let audit = await core.recordAdminAction(
+            conversationID: conversationID,
+            kind: .groupInfoEdited,
+            detail: topic.map { "Description changed to “\($0)”." } ?? "Description cleared."
+        )
         try await core.sendGroupControl(
             conversationID: conversationID, groupID: groupID,
             message: GroupControlMessage(
                 groupID: groupID,
                 epoch: await core.engine.groupEpoch(groupID: groupID) ?? 0,
                 kind: "topicChanged",
-                topic: topic
+                topic: topic,
+                auditEvent: audit
             )
         )
+    }
+
+    func setSlowMode(_ interval: TimeInterval?, conversationID: UUID) async throws {
+        try await core.setSlowMode(interval, conversationID: conversationID)
+    }
+
+    func setChannelPermission(
+        _ permission: GroupPermission,
+        granted: Bool,
+        for role: MemberRole,
+        conversationID: UUID
+    ) async throws {
+        try await core.setChannelPermission(permission, granted: granted, for: role, conversationID: conversationID)
+    }
+
+    func resetChannelPermissions(for role: MemberRole, conversationID: UUID) async throws {
+        try await core.resetChannelPermissions(for: role, conversationID: conversationID)
+    }
+
+    func revokeInvite(conversationID: UUID) async throws {
+        try await core.revokeInvite(conversationID: conversationID)
+    }
+
+    func transferOwnership(to contactID: UUID, conversationID: UUID) async throws {
+        let peer = try await peerForContact(contactID)
+        try await core.transferOwnership(to: peer.fingerprint, conversationID: conversationID)
+    }
+
+    func setPresenceSuppressed(_ suppressed: Bool, conversationID: UUID) async {
+        await core.setPresenceSuppressed(suppressed, conversationID: conversationID)
+    }
+
+    func channelModerationSnapshot(conversationID: UUID) async -> ChannelModerationSnapshot? {
+        await core.moderationSnapshot(conversationID: conversationID)
+    }
+
+    func noteLocalAuditEvent(kind: GroupAdminEventKind, conversationID: UUID, detail: String?) async {
+        await core.noteLocalAuditEvent(kind: kind, conversationID: conversationID, detail: detail)
     }
 
     func rotateSenderKey(conversationID: UUID) async throws {
@@ -953,7 +1024,7 @@ final class LiveServiceFactory: ServiceFactory, Sendable {
             else { return nil }
             return try? IdentityPublic(serialized: keyData)
         }
-        let core = AegisCore(engine: engine, pkgStore: pkgStore, sidecars: sidecars, keyDirectory: keyDirectory)
+        let core = try AegisCore(engine: engine, pkgStore: pkgStore, sidecars: sidecars, keyDirectory: keyDirectory)
         self.core = core
         self.cryptoService = LiveCryptoService(core: core)
         self.transportService = LiveTransportService(core: core)
@@ -1068,10 +1139,6 @@ struct LiveDeviceLinkService: DeviceLinkService {
 
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {
         try await core.deviceLink.sendSync(kind: kind, body: body)
-    }
-
-    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {
-        try await core.deviceLink.sendSync(to: deviceID, kind: kind, body: body)
     }
 
     func unpair(deviceID: UUID) async {

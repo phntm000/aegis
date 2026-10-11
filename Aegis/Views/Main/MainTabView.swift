@@ -10,6 +10,7 @@ struct MainTabView: View {
 
     enum Tab: Hashable {
         case chats
+        case requests
         case contacts
         case calls
         case settings
@@ -27,6 +28,13 @@ struct MainTabView: View {
                 }
                 .tag(Tab.chats)
                 .badge(badgeText)
+
+            MessageRequestsView(appState: appState)
+                .tabItem {
+                    Label("Requests", systemImage: "tray.and.arrow.down.fill")
+                }
+                .tag(Tab.requests)
+                .badge(requestsBadgeText)
 
             ContactsView(appState: appState)
                 .tabItem {
@@ -52,6 +60,11 @@ struct MainTabView: View {
     /// Unread badge; nil hides the badge entirely.
     private var badgeText: Text? {
         chatListViewModel.totalUnread > 0 ? Text("\(chatListViewModel.totalUnread)") : nil
+    }
+
+    /// Message-requests badge; nil hides the badge entirely.
+    private var requestsBadgeText: Text? {
+        appState.messageRequests.count > 0 ? Text("\(appState.messageRequests.count)") : nil
     }
 }
 

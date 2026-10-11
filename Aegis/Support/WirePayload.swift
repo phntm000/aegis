@@ -60,6 +60,10 @@ struct WirePayload: Codable, Sendable {
     var joinGroupReference: String?
     /// The requester's display name, for the approval UI.
     var joinRequesterName: String?
+    /// The invite generation the code was issued at (nil for legacy
+    /// codes). Requests from revoked generations are declined: the
+    /// generation is the revocation mechanism.
+    var joinInviteGeneration: Int?
 
     init(kind: Kind) {
         self.version = Self.currentVersion
