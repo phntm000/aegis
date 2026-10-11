@@ -92,7 +92,7 @@ struct ParticipantVideoTile: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
-        .accessibilityHint("Shows volume and speaker controls")
+        .accessibilityHint("Shows mute and speaker controls")
     }
 
     private var avatarContent: some View {
@@ -203,15 +203,15 @@ struct LocalPreviewView: UIViewRepresentable {
 
 // MARK: - Participant detail sheet
 
-/// Per-participant controls: local-only volume, and (for the host) speaker
-/// approval. Volume never leaves the device.
+/// Per-participant controls: local-only mute, and (for the host) speaker
+/// approval. Mute never leaves the device.
 struct ParticipantDetailSheet: View {
     let fingerprintHex: String
     let room: VoiceRoom
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var volume: Float = 1.0
+    @State private var mutedByMe: Bool = false
 
     private var participant: VoiceRoomParticipant? {
         room.participants.first(where: { $0.fingerprintHex == fingerprintHex })
@@ -229,35 +229,26 @@ struct ParticipantDetailSheet: View {
                     }
                     if !participant.isLocal {
                         Section {
-                            VStack(alignment: .leading, spacing: AegisLayout.s) {
-                                HStack {
-                                    Text("Volume")
-                                    Spacer()
-                                    Text("\(Int(volume * 100))%")
-                                        .monospacedDigit()
-                                        .foregroundStyle(AegisColors.textSecondary)
-                                }
-                                Slider(value: Binding(
-                                    get: { Double(volume) },
-                                    set: { volume = Float($0) }
-                                ), in: 0...1, step: 0.01) {
-                                    Text("Volume")
-                                } minimumValueLabel: {
-                                    Image(systemName: "speaker.fill")
-                                } maximumValueLabel: {
-                                    Image(systemName: "speaker.wave.3.fill")
-                                }
-                                .onChange(of: volume) { _, newValue in
+                            // The stock WebRTC iOS SDK exposes no per-track
+                            // gain, so continuous volume isn't available;
+                            // mute is the per-user control. Local-only:
+                            // nobody else is affected.
+                            Toggle(isOn: Binding(
+                                get: { mutedByMe },
+                                set: { newValue in
+                                    mutedByMe = newValue
                                     Task { @MainActor in
-                                        await appState.setVoiceRoomParticipantVolume(
-                                            fingerprintHex: fingerprintHex, volume: newValue)
+                                        await appState.setVoiceRoomParticipantMuted(
+                                            fingerprintHex: fingerprintHex, muted: newValue)
                                     }
                                 }
-                                Text("Applies only on this device — nobody else is affected.")
-                                    .font(.caption)
-                                    .foregroundStyle(AegisColors.textSecondary)
+                            )) {
+                                Label("Mute for me", systemImage: mutedByMe ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             }
-                            .padding(.vertical, AegisLayout.xs)
+                            .tint(AegisColors.accent)
+                            Text("You won't hear them on this device. They are not notified, and everyone else still hears them.")
+                                .font(.caption)
+                                .foregroundStyle(AegisColors.textSecondary)
                         } header: {
                             Text("Hear them")
                         }
@@ -308,7 +299,7 @@ struct ParticipantDetailSheet: View {
                         Button("Done") { dismiss() }
                     }
                 }
-                .onAppear { volume = participant.volume }
+                .onAppear { mutedByMe = participant.isMutedByMe }
             }
         }
         .accessibilityLabel("Participant controls")

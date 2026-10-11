@@ -769,13 +769,15 @@ final class SQLCipherStoreTests: XCTestCase {
         let c = try await makeConversation()
         let m = try await makeMessage(in: c.id, text: "before migration")
         let conn = await store.conn
+        // Drop the indexes BEFORE the columns they reference: SQLite
+        // refuses DROP COLUMN on an indexed column.
+        try conn.exec("DROP INDEX idx_message_thread;")
+        try conn.exec("DROP INDEX idx_message_starred;")
         try conn.exec("ALTER TABLE message DROP COLUMN quote_snapshot_json;")
         try conn.exec("ALTER TABLE message DROP COLUMN edit_history_json;")
         try conn.exec("ALTER TABLE message DROP COLUMN is_starred;")
         try conn.exec("ALTER TABLE message DROP COLUMN pin_json;")
         try conn.exec("ALTER TABLE conversation DROP COLUMN disappearing_after_read;")
-        try conn.exec("DROP INDEX idx_message_thread;")
-        try conn.exec("DROP INDEX idx_message_starred;")
         try conn.exec("DELETE FROM schema_migrations WHERE version = 4;")
         try conn.exec("PRAGMA user_version = 3;")
         store = nil

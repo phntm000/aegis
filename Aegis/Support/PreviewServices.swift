@@ -118,10 +118,10 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
         cont.yield(.updated(lock.withLock { room }))
     }
 
-    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
+    func setParticipantMuted(fingerprintHex: String, muted: Bool) async {
         lock.withLock {
             if let i = room?.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex }) {
-                room?.participants[i].volume = max(0, min(1, volume))
+                room?.participants[i].isMutedByMe = muted
             }
         }
         cont.yield(.updated(lock.withLock { room }))

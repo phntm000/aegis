@@ -19,8 +19,10 @@ protocol VoiceRoomService: Sendable {
     func setDeafened(_ deafened: Bool) async
     /// Camera publishing for the local user.
     func setCameraEnabled(_ enabled: Bool) async
-    /// Local-only per-user output gain, 0.0–1.0.
-    func setParticipantVolume(fingerprintHex: String, volume: Float) async
+    /// Local-only per-user mute (disables their audio track on this
+    /// device). The stock WebRTC iOS SDK exposes no per-track gain, so
+    /// continuous volume is not offered; mute is the honest control.
+    func setParticipantMuted(fingerprintHex: String, muted: Bool) async
     /// Room mode (open floor / stage). Host-only; ignored otherwise.
     func setRoomMode(_ mode: VoiceRoomMode) async
     /// Raise/lower the local user's hand (stage audience).

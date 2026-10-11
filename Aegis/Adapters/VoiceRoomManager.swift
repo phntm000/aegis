@@ -57,7 +57,7 @@ actor VoiceRoomManager {
     private var mediaEpoch: UInt64 = 0
     /// Local-only per-user output gain, 0.0–1.0, keyed by fingerprint hex.
     /// Applied to the engine whenever the peer's session (re)starts.
-    private var peerVolumes: [String: Float] = [:]
+    private var peerMuted: [String: Bool] = [:]
     /// Speaking-detection hysteresis over locally polled audio levels.
     private var speakingDetector = SpeakingDetector()
     private var heartbeatTask: Task<Void, Never>?
@@ -219,7 +219,7 @@ actor VoiceRoomManager {
             control?.endCallMedia(callID)
         }
         peerCallIDs.removeAll()
-        peerVolumes.removeAll()
+        peerMuted.removeAll()
         speakingDetector = SpeakingDetector()
         mediaEpoch = 0
         room = nil
@@ -337,20 +337,21 @@ actor VoiceRoomManager {
         }
     }
 
-    // MARK: - Per-user volume
+    // MARK: - Per-user mute
 
-    /// Sets the local-only output gain for one participant (0.0–1.0).
-    /// Applied by the room audio mixer on this device; never signaled.
-    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
-        let clamped = max(0, min(1, volume))
-        peerVolumes[fingerprintHex] = clamped
+    /// Mutes/unmutes one participant locally (their audio track is disabled
+    /// on this device only; never signaled). The stock WebRTC iOS SDK
+    /// exposes no per-track gain, so mute is the per-user control;
+    /// continuous volume is a documented limitation.
+    func setParticipantMuted(fingerprintHex: String, muted: Bool) async {
+        peerMuted[fingerprintHex] = muted
         if let callID = peerCallIDs[fingerprintHex] {
-            (await mediaControl())?.setRemoteVolume(clamped, for: callID)
+            (await mediaControl())?.setRemoteMuted(muted, for: callID)
         }
         if var current = room,
            let idx = current.participants.firstIndex(where: { $0.fingerprintHex == fingerprintHex })
         {
-            current.participants[idx].volume = clamped
+            current.participants[idx].isMutedByMe = muted
             room = current
             emit()
         }
@@ -562,8 +563,8 @@ actor VoiceRoomManager {
             participant.isCameraOn = signal.isCameraOn ?? false
             participant.isSpeaker = signal.isSpeaker ?? false
             participant.hasHandRaised = signal.handRaised ?? false
-            // Adopt a stored per-user volume for returning participants.
-            participant.volume = peerVolumes[fingerprintHex] ?? 1.0
+            // Adopt a stored per-user mute for returning participants.
+            participant.isMutedByMe = peerMuted[fingerprintHex] ?? false
             current.participants.append(participant)
             log.info("Voice room peer joined: \(participant.displayName)")
         }
@@ -701,11 +702,11 @@ actor VoiceRoomManager {
         peerCallIDs[fingerprintHex] = callID
         let control = await mediaControl()
         control?.noteCallKind(.audio, for: callID)
-        // Voice-room mesh extras: software-mixer audio path and any stored
-        // per-user volume for this peer.
+        // Voice-room mesh extras: speaking-indicator polling and any
+        // stored per-user mute for this peer.
         control?.noteVoiceRoomPeer(callID)
-        if let volume = peerVolumes[fingerprintHex] {
-            control?.setRemoteVolume(volume, for: callID)
+        if let muted = peerMuted[fingerprintHex] {
+            control?.setRemoteMuted(muted, for: callID)
         }
         do {
             let offer = try await media.createOffer(for: callID)
@@ -742,8 +743,8 @@ actor VoiceRoomManager {
         let control = await mediaControl()
         control?.noteCallKind(.audio, for: callID)
         control?.noteVoiceRoomPeer(callID)
-        if let volume = peerVolumes[signal.senderFingerprintHex] {
-            control?.setRemoteVolume(volume, for: callID)
+        if let muted = peerMuted[signal.senderFingerprintHex] {
+            control?.setRemoteMuted(muted, for: callID)
         }
         do {
             let answer = try await media.createAnswer(for: callID, offerSDP: sdp)
@@ -925,7 +926,7 @@ actor VoiceRoomManager {
             control?.endCallMedia(callID)
         }
         peerCallIDs.removeAll()
-        peerVolumes.removeAll()
+        peerMuted.removeAll()
         speakingDetector = SpeakingDetector()
         mediaEpoch = 0
         room = nil

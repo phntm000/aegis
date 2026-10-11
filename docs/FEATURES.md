@@ -298,7 +298,12 @@ applied before encoding, on-device.
 ### A23. Group voice rooms (Discord-style)
 **What.** Persistent voice rooms inside a group or channel: drop in/out
 without ringing anyone, see who's speaking, stage vs. open-floor modes,
-per-user volume, mute/deafen, and a text sidecar bound to the room.
+per-user mute, mute/deafen, and a text sidecar bound to the room.
+**Limitation.** Continuous per-user volume is not offered: the stock
+WebRTC iOS SDK (verified against the pinned M154 headers) exposes no
+per-track audio tap or gain API, so a volume slider would be a fake
+control. Per-user mute (local-only, never signaled) is the per-user
+control that the platform actually supports.
 **Why it matters.** This is the Discord feature enterprises actually miss in
 secure messengers: the always-open "office" room, the incident bridge, the
 team hangout.

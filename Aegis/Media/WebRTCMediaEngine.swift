@@ -84,16 +84,24 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
     /// callIDs whose video source is currently registered with the fan-out.
     private var cameraUsers: Set<UUID> = []
 
-    // MARK: Voice-room audio (software mixer for per-user volume)
+    // MARK: Voice-room audio (per-user mute + speaking indicators)
 
     /// Peer connections that belong to the voice-room mesh (vs 1:1 calls).
-    /// Room peers never render remote audio through WebRTC: each remote
-    /// audio track is tapped and mixed locally with per-user gain.
+    /// Room peers render remote audio through WebRTC's normal output mix
+    /// like everyone else; per-user control is mute (track disabling).
+    ///
+    /// Ground truth (verified against the pinned WebRTC M154 headers):
+    /// the iOS SDK exposes no per-track audio tap and no per-track gain.
+    /// An earlier design assumed an `RTCAudioSink` PCM tap — that type does
+    /// not exist in the SDK, so it was replaced with this honest subset:
+    /// per-user mute via `RTCAudioTrack.isEnabled`, master deafen by
+    /// muting every room track, and speaking indicators from polled
+    /// `audioLevel` stats. Continuous per-user volume is documented as
+    /// infeasible with stock WebRTC (see docs/FEATURES.md limitation).
     private var roomPeers: Set<UUID> = []
-    /// Pending per-user gains (0.0–1.0), applied when the audio tap attaches.
-    private var roomGains: [UUID: Float] = [:]
-    private var roomMixer = RoomAudioMixer()
-    private var roomMixerRunning = false
+    /// Local-only per-user mute for room peers, keyed by callID. Applied
+    /// to (re-)attached audio tracks; never signaled.
+    private var roomPeerMuted: [UUID: Bool] = [:]
 
     // MARK: Audio-level polling (speaking indicators)
 
@@ -123,20 +131,6 @@ final class WebRTCMediaEngine: NSObject, @unchecked Sendable {
               let track = target.videoTrack
         else { return }
         for renderer in renderers { track.add(renderer) }
-    }
-
-    // MARK: Room mixer lifecycle
-
-    private func maybeStartRoomMixerLocked() {
-        guard !roomPeers.isEmpty else { return }
-        if !roomMixer.start() {
-            log.error("Room audio mixer failed to start; room audio will be silent")
-        }
-    }
-
-    private func maybeStopRoomMixerLocked() {
-        guard roomPeers.isEmpty else { return }
-        roomMixer.stop()
     }
 
     /// Connects the engine to the transport's frame router. Called once at
@@ -491,15 +485,12 @@ extension WebRTCMediaEngine: CallMediaControl {
         lock.withLock {
             guard let media = peers[callID] else { return }
             media.remoteAudioMuted = !enabled
-            if roomPeers.contains(callID) {
-                // Room peers render through the software mixer: deafen is
-                // the mixer's master gain (every room peer shares the same
-                // deafen state, so setting it per callID is idempotent).
-                roomMixer.setMasterGain(enabled ? 1.0 : 0.0)
-            } else {
-                for track in media.remoteAudioTracks {
-                    track.isEnabled = enabled
-                }
+            // Deafen mutes every remote track; a per-user mute stays in
+            // force underneath (un-deafening restores the peer's own mute
+            // state rather than unmuting everyone).
+            let peerMuted = roomPeerMuted[callID] ?? false
+            for track in media.remoteAudioTracks {
+                track.isEnabled = enabled && !peerMuted
             }
         }
     }
@@ -564,12 +555,8 @@ extension WebRTCMediaEngine: CallMediaControl {
             stopCameraLocked(for: callID)
             media.screenCapturer?.stop()
             media.broadcastController?.stop()
-            if let tap = media.audioTap {
-                roomMixer.removePeer(tap.peerID)
-            }
             roomPeers.remove(callID)
-            roomGains.removeValue(forKey: callID)
-            maybeStopRoomMixerLocked()
+            roomPeerMuted.removeValue(forKey: callID)
             refreshLocalPreviewLocked()
             media.connection.close()
             pcToCallID = pcToCallID.filter { $0.value != callID }
@@ -602,12 +589,17 @@ extension WebRTCMediaEngine {
         lock.withLock { roomPeers.insert(callID) }
     }
 
-    func setRemoteVolume(_ volume: Float, for callID: UUID) {
+    /// Local-only per-user mute for a voice-room peer. Disables the peer's
+    /// remote audio track(s) on this device; nothing is signaled. Combines
+    /// with deafen (`setRemoteAudioEnabled`): a peer muted here stays
+    /// muted when the room is un-deafened.
+    func setRemoteMuted(_ muted: Bool, for callID: UUID) {
         lock.withLock {
-            let clamped = max(0, min(2, volume))
-            roomGains[callID] = clamped
-            roomMixer.setGain(clamped, for: callID)
-            peers[callID]?.audioTap?.gain = clamped
+            roomPeerMuted[callID] = muted
+            guard let media = peers[callID] else { return }
+            for track in media.remoteAudioTracks {
+                track.isEnabled = !muted && !media.remoteAudioMuted
+            }
         }
     }
 
@@ -654,33 +646,34 @@ extension WebRTCMediaEngine {
             peers.map { ($0.key, $0.value.connection) }
         }
         for (callID, connection) in snapshot {
-            // M154: statsWithCompletionHandler delivers [RTCStatsReport].
-            // The manager maps callIDs to voice-room peers; 1:1 calls never
-            // enable polling, so their stats are simply never requested.
-            connection.stats { [weak self] reports in
-                self?.handleStatsReports(reports, callID: callID)
+            // M154: `statistics(completionHandler:)` delivers a single
+            // RTCStatisticsReport. The manager maps callIDs to voice-room
+            // peers; 1:1 calls never enable polling, so their stats are
+            // simply never requested.
+            connection.statistics { [weak self] report in
+                self?.handleStatsReport(report, callID: callID)
             }
         }
     }
 
-    private func handleStatsReports(_ reports: [RTCStatsReport], callID: UUID) {
+    private func handleStatsReport(_ report: RTCStatisticsReport, callID: UUID) {
         var local: Float = 0
         var remote: Float = 0
-        for report in reports {
-            // RTCStatsReport.values is NSDictionary<NSString *, id>;
-            // bridge to [String: Any] for the W3C stats keys.
-            let values = report.values as? [String: Any] ?? [:]
-            guard let type = values["type"] as? String,
-                  let kind = values["kind"] as? String,
-                  kind == "audio"
-            else { continue }
-            // audioLevel is the RFC 6464 client-to-mixer audio level,
-            // 0.0–1.0 linear energy. Absent when the peer doesn't negotiate
-            // the header extension — then levels stay 0 (no indicator).
-            let level = (values["audioLevel"] as? NSNumber)?.floatValue ?? 0
-            if type == "inbound-rtp" {
+        // report.statistics is [String: RTCStatistics]; each RTCStatistics
+        // carries W3C stats keys in `values`. Per RFC 6464 / the W3C stats
+        // spec, "track"-type audio stats expose `audioLevel` (0.0–1.0
+        // linear energy); `remoteSource` distinguishes the peer's track
+        // from the local microphone track. Levels are absent when the
+        // audio-level header extension isn't negotiated — indicators then
+        // stay silent rather than guessing.
+        for stat in report.statistics.values {
+            guard stat.type == "track" else { continue }
+            let values = stat.values as [String: Any]
+            guard let level = (values["audioLevel"] as? NSNumber)?.floatValue else { continue }
+            let isRemote = (values["remoteSource"] as? NSNumber)?.boolValue ?? false
+            if isRemote {
                 remote = max(remote, level)
-            } else if type == "outbound-rtp" {
+            } else {
                 local = max(local, level)
             }
         }
@@ -827,37 +820,18 @@ extension WebRTCMediaEngine: RTCPeerConnectionDelegate {
     ) {
         // Remote audio tracks are remembered so deafen (voice rooms) can
         // disable them without tearing down the peer connection. Remote
-        // audio plays through the shared RTCAudioSession by default.
+        // Remote audio renders through WebRTC's normal output mix. Per-user
+        // control is mute (track disabling); the stock iOS SDK exposes no
+        // per-track gain (see the voice-room audio note at the top of this
+        // file). A stored per-user mute or deafen state applies to tracks
+        // that attach later.
         if let audioTrack = rtpReceiver.track as? RTCAudioTrack {
             lock.withLock {
                 guard let callID = pcToCallID[ObjectIdentifier(peerConnection)],
                       let media = peers[callID]
                 else { return }
-                if roomPeers.contains(callID) {
-                    // Voice-room mesh: remote audio never renders through
-                    // WebRTC. A tap feeds decoded PCM into the software
-                    // mixer, which applies per-user gain locally. The track
-                    // stays disabled so there is no double playback.
-                    //
-                    // Assumption (on-device QA): RTCAudioSink keeps
-                    // receiving decoded frames while the track is disabled;
-                    // disabling only removes the track from WebRTC's output
-                    // mix — the same mechanism the existing deafen feature
-                    // already relies on.
-                    audioTrack.isEnabled = false
-                    if media.audioTap == nil {
-                        let tap = RoomAudioTap(peerID: callID)
-                        tap.gain = roomGains[callID] ?? 1.0
-                        audioTrack.add(tap)
-                        media.audioTap = tap
-                        roomMixer.addPeer(tap)
-                        roomMixer.setGain(tap.gain, for: tap.peerID)
-                        maybeStartRoomMixerLocked()
-                    }
-                } else {
-                    media.remoteAudioTracks.append(audioTrack)
-                    audioTrack.isEnabled = !media.remoteAudioMuted
-                }
+                media.remoteAudioTracks.append(audioTrack)
+                audioTrack.isEnabled = !media.remoteAudioMuted && !(roomPeerMuted[callID] ?? false)
             }
             return
         }
@@ -888,8 +862,6 @@ private final class PeerMedia {
     /// Broadcast-upload controller (full-device sharing); takes over
     /// videoSource like the screen capturer.
     var broadcastController: BroadcastShareController?
-    /// Voice-room remote-audio tap feeding the software mixer.
-    var audioTap: RoomAudioTap?
     var videoEnabled = true
     var isScreenSharing = false
     var isBroadcastSharing = false

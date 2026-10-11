@@ -225,6 +225,9 @@ enum StoreSchema {
     /// and polls); `is_starred` is local-only; `pin_json` holds the shared
     /// pin record; `disappearing_after_read` on `conversation` starts the
     /// timer on read instead of send. Fresh databases get v1+v2+v3+v4.
+    /// Applied idempotently by `migrateV4Idempotent()` (per-column
+    /// existence checks), so the raw SQL below is the canonical delta, not
+    /// the execution path.
     static let v4 = """
         ALTER TABLE message ADD COLUMN quote_snapshot_json TEXT;
         ALTER TABLE message ADD COLUMN edit_history_json TEXT NOT NULL DEFAULT '[]';

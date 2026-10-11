@@ -1359,8 +1359,8 @@ final class AppState: ObservableObject {
         await voiceRoom.setCameraEnabled(enabled)
     }
 
-    func setVoiceRoomParticipantVolume(fingerprintHex: String, volume: Float) async {
-        await voiceRoom.setParticipantVolume(fingerprintHex: fingerprintHex, volume: volume)
+    func setVoiceRoomParticipantMuted(fingerprintHex: String, muted: Bool) async {
+        await voiceRoom.setParticipantMuted(fingerprintHex: fingerprintHex, muted: muted)
     }
 
     func setVoiceRoomMode(_ mode: VoiceRoomMode) async {

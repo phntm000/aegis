@@ -1217,8 +1217,8 @@ struct LiveVoiceRoomService: VoiceRoomService {
         await core.voiceRooms.setLocalCameraEnabled(enabled)
     }
 
-    func setParticipantVolume(fingerprintHex: String, volume: Float) async {
-        await core.voiceRooms.setParticipantVolume(fingerprintHex: fingerprintHex, volume: volume)
+    func setParticipantMuted(fingerprintHex: String, muted: Bool) async {
+        await core.voiceRooms.setParticipantMuted(fingerprintHex: fingerprintHex, muted: muted)
     }
 
     func setRoomMode(_ mode: VoiceRoomMode) async {

@@ -36,9 +36,9 @@ struct VoiceRoomParticipant: Identifiable, Hashable, Sendable {
     /// Local-only: computed from WebRTC audio levels on this device, never
     /// transmitted. Drives the speaking ring in the UI.
     var isSpeaking: Bool = false
-    /// Local-only: per-user output gain 0.0–1.0, applied by the room audio
-    /// mixer on this device. Never transmitted.
-    var volume: Float = 1.0
+    /// Local-only: this device has muted the participant (their remote
+    /// audio track is disabled here). Never transmitted.
+    var isMutedByMe: Bool = false
     /// Local-only: WebRTC connectivity for this participant's peer
     /// connection. Drives "connecting/reconnecting" tile badges.
     var mediaState: ParticipantMediaState = .connecting
@@ -256,8 +256,8 @@ func canTransmit(mode: VoiceRoomMode, participant: VoiceRoomParticipant) -> Bool
 
 /// Local speaking detection over polled WebRTC audio levels.
 ///
-/// Levels are 0.0–1.0 linear energy computed on this device from decoded
-/// audio. Hysteresis avoids flicker: two consecutive polls above the start
+/// Levels are 0.0–1.0 linear energy from WebRTC stats (RFC 6464 audio
+/// level on "track"-type stats), computed on this device. Hysteresis avoids flicker: two consecutive polls above the start
 /// threshold assert speaking, four consecutive polls below the stop
 /// threshold release it. Nothing here is transmitted — input and output
 /// stay on the device, so no voice biometrics ever leave it.

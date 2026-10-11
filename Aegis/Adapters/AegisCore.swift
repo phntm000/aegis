@@ -213,13 +213,15 @@ protocol CallMediaControl: AnyObject, Sendable {
     // MARK: Voice-room mesh extras
 
     /// Marks a peer connection as a voice-room mesh peer (vs a 1:1 call).
-    /// Room peers route remote audio through the software mixer (per-user
-    /// volume) instead of WebRTC's default rendering, and take part in
-    /// audio-level polling for speaking indicators.
+    /// Room peers take part in audio-level polling for speaking
+    /// indicators; their remote audio renders through WebRTC's normal
+    /// output mix like 1:1 calls.
     func noteVoiceRoomPeer(_ callID: UUID)
-    /// Per-user output gain for a voice-room peer, 0.0–1.0 (default 1.0).
-    /// Applied locally by the room audio mixer; never signaled.
-    func setRemoteVolume(_ volume: Float, for callID: UUID)
+    /// Local-only per-user mute for a voice-room peer. Disables the peer's
+    /// remote audio track on this device; never signaled. The stock WebRTC
+    /// iOS SDK exposes no per-track gain, so continuous per-user volume is
+    /// not offered (documented limitation) — mute is the honest control.
+    func setRemoteMuted(_ muted: Bool, for callID: UUID)
     /// Drops the cached peer-connection factory so subsequently created
     /// peer connections use a fresh DTLS certificate. The caller tears down
     /// existing connections and renegotiates (see VoiceRoomManager's
@@ -251,8 +253,8 @@ protocol CallMediaControl: AnyObject, Sendable {
     // MARK: Engine callbacks (voice rooms; unused by the 1:1 path)
 
     /// Audio levels per peer-connection UUID, polled while
-    /// `setAudioLevelPolling(true)` is active. Computed locally from
-    /// decoded audio; nothing leaves the device.
+    /// `setAudioLevelPolling(true)` is active. Computed on-device from
+    /// WebRTC stats (RFC 6464 audio levels); nothing leaves the device.
     ///
     /// Not @Sendable (like the existing `onLocalIceCandidate`): the
     /// manager captures its actor weakly and hops back via Task.
@@ -268,7 +270,7 @@ protocol CallMediaControl: AnyObject, Sendable {
 struct CallAudioLevels: Sendable {
     /// This device's microphone energy on the outbound stream.
     var local: Float
-    /// The peer's decoded-audio energy on the inbound stream.
+    /// The peer's audio energy from inbound stats.
     var remote: Float
 }
 

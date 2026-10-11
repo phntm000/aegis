@@ -327,7 +327,7 @@ final class SQLCipherConnection {
         if version < 4 {
             try exec("BEGIN IMMEDIATE;")
             do {
-                try execRaw(StoreSchema.v4)
+                try migrateV4Idempotent()
                 try execRaw(
                     "INSERT INTO schema_migrations(version, applied_at) VALUES (4, \(Date().timeIntervalSince1970));"
                 )
@@ -338,6 +338,47 @@ final class SQLCipherConnection {
                 throw AegisStoreError.migrationFailed("v4 migration failed: \(error)")
             }
         }
+    }
+
+    /// Applies the v4 messaging-richness delta idempotently: each
+    /// `ADD COLUMN` runs only when the column is absent (checked via
+    /// `PRAGMA table_info`). A plain re-execution of the raw v4 SQL fails
+    /// with "duplicate column" on databases that already carry the columns
+    /// — e.g. a v1/v2-era database whose harness dropped the v2/v3 tables
+    /// but kept the v4 columns, or a retried migration — which previously
+    /// surfaced as a fatal startup failure. The `CREATE INDEX` statements
+    /// are already `IF NOT EXISTS`.
+    private func migrateV4Idempotent() throws {
+        func existingColumns(in table: String) throws -> Set<String> {
+            let rows = try queryRaw("PRAGMA table_info(\(table));")
+            return Set(rows.compactMap { row -> String? in
+                guard case .text(let name) = row["name"] else { return nil }
+                return name
+            })
+        }
+        // NOTE: table names are compile-time constants, never user input.
+        let messageColumns = try existingColumns(in: "message")
+        let addMessageColumn: [(String, String)] = [
+            ("quote_snapshot_json", "ALTER TABLE message ADD COLUMN quote_snapshot_json TEXT;"),
+            ("edit_history_json", "ALTER TABLE message ADD COLUMN edit_history_json TEXT NOT NULL DEFAULT '[]';"),
+            ("is_starred", "ALTER TABLE message ADD COLUMN is_starred INTEGER NOT NULL DEFAULT 0;"),
+            ("pin_json", "ALTER TABLE message ADD COLUMN pin_json TEXT;"),
+        ]
+        for (column, ddl) in addMessageColumn where !messageColumns.contains(column) {
+            try execRaw(ddl)
+        }
+        let conversationColumns = try existingColumns(in: "conversation")
+        if !conversationColumns.contains("disappearing_after_read") {
+            try execRaw("ALTER TABLE conversation ADD COLUMN disappearing_after_read INTEGER NOT NULL DEFAULT 0;")
+        }
+        try execRaw(
+            """
+            CREATE INDEX IF NOT EXISTS idx_message_thread
+              ON message(conversation_id, thread_root);
+            CREATE INDEX IF NOT EXISTS idx_message_starred
+              ON message(conversation_id, is_starred);
+            """
+        )
     }
 }
 
