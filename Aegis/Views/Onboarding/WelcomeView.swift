@@ -8,51 +8,61 @@ struct WelcomeView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
-        VStack(spacing: AegisLayout.xl) {
-            Spacer()
-            Image(systemName: "shield.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(AegisColors.accent)
-                .accessibilityHidden(true)
-            Text("Private by architecture,\nnot by promise.")
-                .font(AegisType.title)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(AegisColors.textPrimary)
+        // Scroll-if-needed: the step content is taller than short windows
+        // (and taller than any window at large Dynamic Type sizes). The
+        // minHeight keeps the Spacers distributing the design's vertical
+        // rhythm when everything fits, and the ScrollView takes over —
+        // instead of clipping the title — when it doesn't.
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: AegisLayout.xl) {
+                    Spacer()
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 72))
+                        .foregroundStyle(AegisColors.accent)
+                        .accessibilityHidden(true)
+                    Text("Private by architecture,\nnot by promise.")
+                        .font(AegisType.title)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(AegisColors.textPrimary)
 
-            VStack(alignment: .leading, spacing: AegisLayout.l) {
-                explainerRow(
-                    icon: "key.fill",
-                    title: "No account, no phone number, no email",
-                    body: "Your identity is a cryptographic keypair generated on this device. There is nothing to sign up for — and nothing to leak."
-                )
-                explainerRow(
-                    icon: "lock.fill",
-                    title: "End-to-end encrypted, always",
-                    body: "Messages, calls, groups, and files are encrypted before they leave your phone. No one in the middle can read them — including us."
-                )
-                explainerRow(
-                    icon: "server.rack",
-                    title: "Free forever, yours to host",
-                    body: "The relay code is open source. Go LAN-only, or self-host a relay in minutes."
-                )
-            }
-            .padding(.horizontal, AegisLayout.l)
+                    VStack(alignment: .leading, spacing: AegisLayout.l) {
+                        explainerRow(
+                            icon: "key.fill",
+                            title: "No account, no phone number, no email",
+                            body: "Your identity is a cryptographic keypair generated on this device. There is nothing to sign up for — and nothing to leak."
+                        )
+                        explainerRow(
+                            icon: "lock.fill",
+                            title: "End-to-end encrypted, always",
+                            body: "Messages, calls, groups, and files are encrypted before they leave your phone. No one in the middle can read them — including us."
+                        )
+                        explainerRow(
+                            icon: "server.rack",
+                            title: "Free forever, yours to host",
+                            body: "The relay code is open source. Go LAN-only, or self-host a relay in minutes."
+                        )
+                    }
+                    .padding(.horizontal, AegisLayout.l)
 
-            Spacer()
-            Button("Get started", action: onContinue)
-                .buttonStyle(.borderedProminent)
-                .tint(AegisColors.accent)
-                .frame(maxWidth: .infinity, minHeight: AegisLayout.minTapTarget)
-                .padding(.horizontal, AegisLayout.l)
-                .accessibilityLabel("Get started with Aegis")
-            Button("Link to an existing device") {
-                showingLink = true
+                    Spacer()
+                    Button("Get started", action: onContinue)
+                        .buttonStyle(.borderedProminent)
+                        .tint(AegisColors.accent)
+                        .frame(maxWidth: .infinity, minHeight: AegisLayout.minTapTarget)
+                        .padding(.horizontal, AegisLayout.l)
+                        .accessibilityLabel("Get started with Aegis")
+                    Button("Link to an existing device") {
+                        showingLink = true
+                    }
+                    .font(AegisType.callout)
+                    .foregroundStyle(AegisColors.accent)
+                    .frame(minHeight: AegisLayout.minTapTarget)
+                    .padding(.top, AegisLayout.s)
+                    .accessibilityLabel("Link this device to an existing Aegis device")
+                }
+                .frame(minHeight: geo.size.height)
             }
-            .font(AegisType.callout)
-            .foregroundStyle(AegisColors.accent)
-            .frame(minHeight: AegisLayout.minTapTarget)
-            .padding(.top, AegisLayout.s)
-            .accessibilityLabel("Link this device to an existing Aegis device")
         }
         .sheet(isPresented: $showingLink) {
             LinkDeviceOnboardingView()
