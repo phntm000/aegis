@@ -29,6 +29,8 @@ packages:
     path: Packages/AegisStore
   WebRTCBridge:
     path: Packages/WebRTCBridge
+  AegisDeviceLink:
+    path: Packages/AegisDeviceLink
 
 targets:
   Aegis:
@@ -51,6 +53,9 @@ targets:
       - package: AegisStore
         products:
           - AegisStore
+      - package: AegisDeviceLink
+        products:
+          - AegisDeviceLink
       - package: WebRTCBridge
         products:
           - WebRTCBridge

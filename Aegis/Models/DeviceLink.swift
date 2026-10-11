@@ -18,6 +18,17 @@ import Foundation
 //   a wire-format revision for device-addressed ratchet sessions.
 // - Pairing transfers contacts, conversations, and recent history so the
 //   linked device is immediately useful.
+// - The paired channel key is STATIC (Keychain, one per device pair): the
+//   channel has no forward secrecy. A compromised channel key exposes past
+//   and future paired traffic, including synced message content, blob
+//   manifests, and attachment file keys. Key rotation is a future wire
+//   revision.
+// - Unpairing wipes the channel keys on both sides but CANNOT remote-wipe
+//   content already synced to the other device (messages, blobs). The UI
+//   says exactly this.
+// - Linked → primary sends are text-only in v1; attachments and voice notes
+//   send from the primary device (the composer hides those affordances on
+//   linked devices instead of failing silently).
 
 /// A device in the link set. The primary stores one per linked device; a
 /// linked device stores exactly one (its primary).
@@ -102,6 +113,32 @@ struct LinkedMessage: Codable, Sendable, Hashable {
     var status: String
     var sentAt: Date
     var expiresAt: Date?
+    /// Attachment metadata (no key material — the blob and file key arrive
+    /// via the paired blob-transfer protocol, see LinkedBlobManifest).
+    var attachment: LinkedAttachmentMeta? = nil
+    var voiceNote: LinkedVoiceNoteMeta? = nil
+}
+
+/// Attachment metadata synced to the linked device. The linked device
+/// renders the row from this and fetches the blob on demand over the
+/// paired channel; it never touches the relay blob store directly (it has
+/// no conversation keys to unwrap the file key with).
+struct LinkedAttachmentMeta: Codable, Sendable, Hashable {
+    var id: UUID
+    var filename: String
+    var mimeType: String
+    var byteCount: Int64
+    var thumbnailData: Data?
+}
+
+/// Voice-note metadata synced to the linked device.
+struct LinkedVoiceNoteMeta: Codable, Sendable, Hashable {
+    var id: UUID
+    var duration: TimeInterval
+    var levels: [Float]
+    /// On-device transcript, when the primary produced one. Forwarded
+    /// verbatim inside the paired channel envelope.
+    var transcript: String?
 }
 
 /// Sync traffic on the long-term paired channel (AES-GCM with the paired key).
@@ -116,6 +153,21 @@ enum DeviceSyncKind: String, Codable, Sendable {
     case unpair
     /// Primary → linked: heartbeat (keeps lastSeen fresh).
     case heartbeat
+    /// Primary → linked: a blob (attachment / voice note) is available for
+    /// download over the paired channel. Body: LinkedBlobManifest (JSON).
+    /// Sent eagerly with the message forward; chunks only flow on request.
+    case attachmentManifest
+    /// Primary → linked: one indexed ciphertext chunk. Body:
+    /// LinkedBlobChunk (JSON). Each frame is sealed by the paired channel.
+    case attachmentChunk
+    /// Linked → primary: "send me this blob", optionally resuming from a
+    /// chunk index. Body: LinkedBlobRequest (JSON). Doubles as "I missed
+    /// the manifest" — the primary re-offers when it doesn't know the
+    /// transfer.
+    case attachmentRequest
+    /// Primary → linked: the blob can't be served. Body:
+    /// LinkedBlobFailure (JSON).
+    case attachmentFailure
     /// Internal: the secondary applied a provisioning bundle (delivered via
     /// the sync event stream so the app layer can persist it).
     case provisioningApplied
@@ -148,6 +200,24 @@ struct LinkedMessageStatus: Codable, Sendable {
     var messageID: UUID
     var conversationID: UUID
     var status: String
+}
+
+/// Primary-side outbound blob sync progress (primary → linked device),
+/// surfaced in Settings → Linked devices so the user can see what their
+/// primary is sending to their other devices.
+struct DeviceSyncProgress: Identifiable, Sendable, Hashable {
+    enum State: Sendable, Hashable {
+        case streaming
+        case done
+        case failed(String)
+    }
+    /// The blob transfer this progress belongs to.
+    var id: UUID
+    var filename: String
+    var deviceName: String
+    /// 0...1
+    var progress: Double
+    var state: State
 }
 
 /// SAS words for pairing verification (4 words from a fixed list, derived

@@ -326,7 +326,8 @@ enum StoreMapping {
                 levels: extra.levels,
                 wrappedKey: wrappedKey,
                 remoteLocator: pkg.remoteLocator,
-                localRelativePath: pkg.localRelativePath
+                localRelativePath: pkg.localRelativePath,
+                transcript: pkg.transcription
             )
             return (nil, note)
         }

@@ -55,7 +55,35 @@ struct DeviceLinkView: View {
             } header: {
                 Text(appState.isLinkedDevice ? "Primary device" : "Linked devices")
             } footer: {
-                Text("A linked device relays through \(appState.isLinkedDevice ? "the primary" : "this device") over an end-to-end encrypted paired channel. Unpairing wipes the channel keys on both sides.")
+                Text("A linked device relays through \(appState.isLinkedDevice ? "the primary" : "this device") over an end-to-end encrypted paired channel. Unpairing wipes the channel keys on both sides, but it can't remove files already synced to the other device.")
+            }
+
+            if !appState.isLinkedDevice && !appState.linkedSyncProgress.isEmpty {
+                Section {
+                    ForEach(appState.linkedSyncProgress) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: AegisLayout.s) {
+                                Text(item.filename)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                Spacer()
+                                syncStateIcon(item.state)
+                            }
+                            Text("To \(item.deviceName)")
+                                .font(.caption)
+                                .foregroundStyle(AegisColors.textSecondary)
+                            ProgressView(value: item.progress)
+                                .tint(AegisColors.accent)
+                        }
+                        .padding(.vertical, 2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(syncAccessibilityLabel(item))
+                    }
+                } header: {
+                    Text("Syncing to linked devices")
+                } footer: {
+                    Text("Attachments and voice notes are sent to your linked devices over the end-to-end encrypted paired channel.")
+                }
             }
 
             if !appState.isLinkedDevice {
@@ -125,6 +153,37 @@ struct DeviceLinkView: View {
             get: { scannedSAS != nil },
             set: { if !$0 { scannedSAS = nil } }
         )
+    }
+
+    @ViewBuilder
+    private func syncStateIcon(_ state: DeviceSyncProgress.State) -> some View {
+        switch state {
+        case .streaming:
+            ProgressView()
+                .tint(AegisColors.accent)
+                .controlSize(.small)
+                .accessibilityHidden(true)
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(AegisColors.success)
+                .accessibilityHidden(true)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(AegisColors.danger)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func syncAccessibilityLabel(_ item: DeviceSyncProgress) -> String {
+        let percent = Int(item.progress * 100)
+        switch item.state {
+        case .streaming:
+            return "Syncing \(item.filename) to \(item.deviceName), \(percent) percent"
+        case .done:
+            return "\(item.filename) synced to \(item.deviceName)"
+        case .failed(let reason):
+            return "Syncing \(item.filename) to \(item.deviceName) failed: \(reason)"
+        }
     }
 
     private func handleScanned(_ payload: String) async {
