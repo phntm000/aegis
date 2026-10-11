@@ -88,14 +88,27 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      # ReplayKit broadcast upload extensions cannot be installed on the iOS
+      # simulator (platform limitation) — the extension target still compiles
+      # here and ships on device builds, but the .appex must be stripped from
+      # the simulator .app between build and install or simctl install fails.
+      # Stripping happens AFTER the build (not as a build phase) because
+      # Xcode's ValidateEmbeddedBinary phase runs after all script phases and
+      # fails on a deleted appex.
       - name: Build & test app (simulator, unsigned)
-        run: >
-          xcodebuild test
-          -project Aegis.xcodeproj
-          -scheme Aegis
-          -configuration Debug
-          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
-          CODE_SIGNING_ALLOWED=NO
+        run: |
+          xcodebuild build-for-testing \
+            -project Aegis.xcodeproj \
+            -scheme Aegis \
+            -configuration Debug \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -derivedDataPath /tmp/AegisDerivedData \
+            CODE_SIGNING_ALLOWED=NO
+          rm -rf /tmp/AegisDerivedData/Build/Products/Debug-iphonesimulator/Aegis.app/PlugIns/AegisBroadcastUpload.appex
+          XCTESTRUN=$(find /tmp/AegisDerivedData/Build/Products -maxdepth 1 -name '*.xctestrun' | head -1)
+          xcodebuild test-without-building \
+            -xctestrun "$XCTESTRUN" \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
 
   relay:
     name: Relay self-test
