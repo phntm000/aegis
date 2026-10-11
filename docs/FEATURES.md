@@ -20,6 +20,78 @@ Cryptographic mechanics live in `docs/CRYPTO.md`; the adversary model lives in
 **Feature count: 48.** Sections: Core messaging (17) · Media & calls (11) ·
 Trust, safety & network (20, incl. 5 beyond-parity).
 
+## Implementation status (October 2026 — parity grind)
+
+Shipped means: implemented in code, persisted in the encrypted store,
+exposed in the UI, and passing CI. Status is per feature, verified
+against the implementation; "spec-only" features below are specified
+but not built.
+
+**Shipped:** A1 (1:1 E2EE) · A2 (groups, sender-key crypto) · A3, A4
+(channels) · A5 (disappearing timers 10s…7d + after-read, tombstone
+propagation, `expungeDisappeared`) · A6 (sealed sender, default-on) ·
+A7 (offline-first outbox) · A8 (replies w/ frozen quote snapshots) · A9
+(threads) · A10 (reactions + custom emoji packs) · A11 (edit w/ version
+history, delete w/ signed tombstones) · A12 (polls: single/multi-choice,
+anonymous, timed close, quorum display, signed ballots) · A13 (read
+receipts / typing toggles) · A15 (starred local-only, pinned shared w/
+expiry) · A18 (chunked encrypted attachments, 2 GB) · A20, A21 (E2EE 1:1
+voice/video, DTLS-SRTP, 1:1 SAS ceremony) · A22 (screen sharing in 1:1
+calls, in-app + full-device via ReplayKit broadcast extension,
+view-only) · A23 (group voice rooms: audio + video, speaking indicators,
+stage vs open-floor modes, per-user *mute*) · A29 (linked
+devices via QR+SAS paired relay; attachments + voice notes sync via
+`DeviceLinkBlobRelay` — text-first, primary must be reachable) · A30
+(safety numbers) · A31 (message-requests inbox) · A32 (QR invites, incl.
+revocation generations) · A34 (biometric app lock only — decoy vault
+not built) · A35 (screenshot alerts + app-switcher shield; screen
+*recording* detection unverified) · A36 (roles + 9 granular permissions,
+client-enforced from signed group state) · A37 (slow mode) · A43 (local
+hash-chained signed audit log, incl. invalid-event records) · A47
+(SQLCipher store + in-DB FTS5) · call-history records.
+
+**Partial:** A19 (voice notes ship as AAC/.m4a; on-device transcription
+not implemented) · A33 (nearby BLE discovery — no transport code found)
+· A45 (LAN-only mode — policy enum exists; enforcement unverified) ·
+A46 (Argon2id key backup exists at the crypto layer; no app UI) ·
+A13 per-chat "ghost" toggles exist; global ghost mode is spec-only.
+
+**Spec-only (future):** A14 (scheduled messages) · A16 (encrypted chat
+export) · A17 (link previews) · A24 (push-to-talk) · A25 (live captions)
+· A26 (local call recording w/ consent signaling) · A27 (noise
+suppression) · A28 (bandwidth-adaptive Opus) · A38 (relay canary) · A39
+(per-message re-key) · A40 (compromise-recovery ceremony) · A41 (ghost
+mode) · A42 (vault chats) · A44 (briefing channels) · A48 (global
+on-device search).
+
+**Documented limitations** (honest, never implemented-as-if):
+- No APNs push (requires a paid Apple Developer account; by design no
+  push token is registered).
+- No desktop client (iOS project scope).
+- No bots: a bot needs message content, and any entity that can read
+  group content must hold the group keys — that breaks the "no silent
+  participant" guarantee and the membership-visibility model. A
+  "bot-safe" variant would need per-message capability grants, which is
+  wire-format work, not a bolt-on.
+- No per-device sender keys (needs a wire-format revision — future).
+- The ReplayKit broadcast upload extension cannot be installed on the
+  iOS simulator (platform limitation, verified): it compiles and ships
+  on device builds; CI strips the `.appex` from simulator builds because
+  Xcode's `ValidateEmbeddedBinary` runs after all script phases.
+- Continuous per-user voice-room volume is infeasible with stock WebRTC
+  (verified against the pinned M154 headers — no `RTCAudioSink`, no
+  per-track gain API). Shipped as local-only per-user *mute*
+  (`RTCAudioTrack.isEnabled`), which is what the platform supports.
+
+**HIG / accessibility sweep (Oct 2026, shipped).** The parity `polish-hig`
+stream swept the UI: a shared `aegisMinimumTapTarget()` modifier enforces
+the Apple HIG 44×44pt minimum on small controls (`AegisLayout.minTapTarget
+= 44`); a shared `ErrorStateView` guarantees error states always carry a
+wired Retry action and are never mislabeled as "empty"; accessibility
+labels and hints were added across chat, conversation, contacts, groups,
+onboarding, and settings surfaces; Dynamic Type and dark mode are honored.
+Destructive actions (unpair, delete, revoke) use confirmation UI.
+
 ---
 
 ## A. Core messaging
@@ -183,6 +255,7 @@ them. A malicious modified client could ignore your preference; the spec
 states this rather than promising the impossible.
 
 ### A14. Scheduled messages (device-side)
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Compose now, deliver at a chosen time. Scheduling is computed and
 stored on-device; the app wakes (background task / push-less local
 notification) to seal and send at fire time.
@@ -204,6 +277,7 @@ shared state signed by the pinner; pinning a disappearing message is blocked
 with an explanation.
 
 ### A16. Encrypted chat export
+**Status (Oct 2026):** spec-only — no export UI exists in the app.
 **What.** Export any conversation (or everything) to an encrypted archive:
 AES-256-GCM with a user-supplied passphrase (Argon2id KDF), containing
 messages, attachments, and a manifest. Import restores into the local store.
@@ -215,6 +289,7 @@ requires admin approval per org policy (configurable); every export is written
 to the local admin audit log (A43).
 
 ### A17. Link previews fetched on-device
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** When a message contains a URL, the *recipient's device* fetches the
 preview (title, image, description) directly — never a central preview server.
 Fetch happens only on Wi-Fi by default, only for senders you haven't blocked,
@@ -248,9 +323,14 @@ sealed message envelope, never alongside the chunks. Pause/cancel wipes
 partial chunks from the store.
 
 ### A19. Voice notes with on-device transcription
-**What.** Hold-to-record voice notes (Opus, variable bitrate), with optional
-transcription done entirely on-device via Apple's Speech framework in
-on-device mode. Transcripts are stored alongside the note and are searchable.
+**What.** Hold-to-record voice notes (AAC/.m4a; the spec's Opus target is
+not yet implemented), encrypted as attachments. **On-device transcription
+is specified but not implemented** — no `SFSpeechRecognizer` integration
+exists in the app today. When transcripts exist (e.g. set on another
+device), they ride in the linked-device blob manifest; they are not
+generated in-app.
+**Status (Oct 2026):** partial — recording, playback, and linked-device
+sync work; transcription does not.
 **Why it matters.** Voice is faster than typing for field reports and
 incident narration; transcripts make them skimmable and searchable without
 sending audio to a transcription vendor.
@@ -284,9 +364,18 @@ call (A22) re-keys the video stream so a compromised share can't leak camera
 frames.
 
 ### A22. Screen sharing in calls
-**What.** Share a screen, window, or app region during any call, with
+**What.** Share a screen, window, or app region during any 1:1 call, with
 remote-control explicitly *not* offered (view-only by design). The sharer can
 pause, annotate locally, and redact regions.
+**Status (Oct 2026):** shipped. In-app sharing re-keys the video stream;
+full-device capture is provided by the `AegisBroadcastUpload` ReplayKit
+broadcast upload extension: extension frames are downscaled to 720p,
+JPEG-encoded, handed to the app via the `group.app.aegis.ios` App Group
+shared container, and fed into the call's `RTCVideoSource` — the peer
+sees the device screen over the same DTLS-SRTP video track. The OS
+broadcast-consent UI is never suppressed. The extension cannot be
+installed on the iOS simulator (platform limitation); CI strips the
+`.appex` from simulator builds, device builds ship it.
 **Why it matters.** Demos, pair debugging, document review — the core of
 remote enterprise collaboration.
 **Privacy & security.** View-only is a deliberate security choice: remote
@@ -299,6 +388,17 @@ applied before encoding, on-device.
 **What.** Persistent voice rooms inside a group or channel: drop in/out
 without ringing anyone, see who's speaking, stage vs. open-floor modes,
 per-user mute, mute/deafen, and a text sidecar bound to the room.
+<<<<<<< HEAD
+=======
+**Status (Oct 2026):** shipped, **including video**: every mesh peer
+connection negotiates a video m-line; the local video track stays
+disabled until the user enables the camera. Speaking indicators are
+computed from polled WebRTC `audioLevel` statistics (300 ms cadence),
+entirely local. Stage mode ships with deterministic host election (the
+room creator while present; hand-raise queue for speakers). Per-user
+control is **mute only** — see limitation below. The room-bound text
+sidecar is spec-only (not yet built).
+>>>>>>> origin/parity/docs-protocol
 **Limitation.** Continuous per-user volume is not offered: the stock
 WebRTC iOS SDK (verified against the pinned M154 headers) exposes no
 per-track audio tap or gain API, so a volume slider would be a fake
@@ -317,6 +417,7 @@ and never transmitted as anything but anonymous energy hints — no voice
 biometrics leave the device.
 
 ### A24. Push-to-talk (PTT)
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Hold a key/button to transmit in voice rooms; configurable
 voice-activity vs. PTT per room; priority speaker channel for incident
 commanders.
@@ -326,6 +427,7 @@ how dispatch, field ops, and event crews actually work.
 packets flowing or not. No "is holding the button" presence leaks.
 
 ### A25. Live captions on-device
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Real-time speech-to-text captions during calls and voice rooms,
 rendered locally using on-device speech recognition. Optional per-participant
 caption pane; captions can be saved to the local call notes with consent.
@@ -338,6 +440,9 @@ requires the same consent signaling as call recording (A26); all parties see
 an indicator while caption-saving is active.
 
 ### A26. Call recording stored locally with consent signaling
+**Status (Oct 2026):** spec-only — not implemented. (What *does* exist is
+call *history* records in the local store — direction, outcome,
+duration — not audio capture.)
 **What.** Record any call to the *local* encrypted store (never to a server).
 Starting a recording emits a signed consent-request to all participants; the
 recording begins only when every participant's client acknowledges (or after
@@ -356,6 +461,7 @@ shows the applicable rule based on participants' declared regions and
 defaults to the strictest.
 
 ### A27. Noise suppression (on-device)
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** RNNoise-class neural noise suppression applied to the mic path
 before encoding, with a per-call toggle and a "studio" preset for music.
 **Why it matters.** Calls from airports, factories, and open offices stay
@@ -365,6 +471,8 @@ use the product.
 sent anywhere for "enhancement." The model runs in the app sandbox.
 
 ### A28. Bandwidth-adaptive Opus
+**Status (Oct 2026):** spec-only — not implemented (no bitrate adaptation
+or connection-health readout found in the media engine).
 **What.** The Opus encoder continuously adapts bitrate (6–128 kbps), frame
 size, and FEC based on measured loss/jitter, with graceful degradation to
 narrowband before dropping. Exposed as a live "connection health" readout.
@@ -394,6 +502,8 @@ across reconnects in the thread UI and outbound progress in Settings →
 Linked devices. Voice-note transcripts ride along in the manifest when the
 primary has one. Linked → primary media sending stays unavailable in v1
 (text only); the composer hides those affordances on linked devices.
+Chunked 32 KiB framing is implemented in `DeviceLinkBlobRelay`; a blind
+download parks when the manifest offer is missed and resumes on re-offer.
 **Why it matters.** People work across phone, tablet, and desktop-class
 devices. Single-device messengers lose to incumbents on this alone.
 **Privacy & security.** No cloud holds your keys — linking is a local QR
@@ -477,6 +587,9 @@ undisturbed.
 are real for journalists, executives, and anyone traveling with sensitive
 discussions. A lock screen that just says "no" invites escalation; a plausible
 decoy de-escalates.
+**Status (Oct 2026):** partial — biometric/passcode app lock with
+configurable auto-lock is shipped (`AppLockManager`); the duress PIN and
+decoy vault are spec-only.
 **Privacy & security.** The decoy is a genuinely separate SQLCipher database
 with its own key in the Keychain; entering the duress PIN never touches the
 real DB file. Honest caveats, stated in-app: (1) a forensic examiner who
@@ -499,6 +612,11 @@ catch a second phone photographing the screen, a modified client, or (on
 some iOS versions) capture via accessibility APIs. It is a deterrent and an
 audit signal (feeds A43), not a prevention mechanism. No screenshot *content*
 is ever transmitted.
+**Status (Oct 2026):** partial — screenshot alerts are shipped
+(`PrivacyController` observes the system screenshot notification and posts
+a notice to the visible conversation and to peers; an app-switcher snapshot
+shield is also in place). Screen-*recording* detection is specified but
+unverified in the implementation.
 
 ### A36. Roles & permissions
 **What.** Per-group role system: Owner, Admin, Moderator, Member, Guest.
@@ -525,6 +643,7 @@ attempts to bypass are visible as invalid events to honest clients. No
 server-side throttling metadata is generated.
 
 ### A38. Relay operator transparency (signed canary/status doc)
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Every relay publishes a signed status document: operator identity,
 software version, uptime, envelope TTL policy, abuse-contact, and a
 **warrant canary** statement, refreshed at least weekly and signed by the
@@ -541,6 +660,7 @@ cross-check against the open-source release. Self-hosted relays let an org
 sign its own canary.
 
 ### A39. Per-message forward-secrecy re-key ★ beyond parity
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Beyond the standard Double Ratchet, Aegis performs an additional
 ephemeral DH re-key on a configurable cadence (every N messages or T minutes,
 default 100 / 24h) *within* long-lived conversations, and exposes a "re-key
@@ -557,6 +677,7 @@ cost per re-key (one X25519 op per participant) — measured, not hand-waved,
 in the perf budget (see ROADMAP).
 
 ### A40. Compromise-recovery re-verification ceremony ★ beyond parity
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** If a device is lost, stolen, or suspected compromised: one tap
 starts a guided recovery — revoke the device's keys (A29), rotate all group
 keys you're part of, notify contacts with signed "key reset" events, and walk
@@ -572,6 +693,7 @@ contacts can distinguish legitimate recovery from an attacker's key swap —
 the exact attack this ceremony is designed to make visible.
 
 ### A41. Metadata-minimal "ghost mode" presence ★ beyond parity
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** A global presence setting with three levels: **Normal** (online
 status, last-seen, typing, receipts per chat settings), **Quiet** (no
 last-seen, no typing, receipts off), **Ghost** (additionally: randomized
@@ -588,6 +710,7 @@ adversary correlating across the whole network — the UI explains the
 difference in one sentence at enable time.
 
 ### A42. Local-only "vault chats" ★ beyond parity
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** A conversation type that *never touches any relay or network at
 all*. Messages live only in the local encrypted store. To share a vault chat
 with another device, you physically export an encrypted vault file (QR
@@ -603,6 +726,10 @@ guarantee. The UI marks vault chats with a persistent distinct treatment so
 they're never confused with synced chats.
 
 ### A43. Admin audit log (local, signed) 
+**Status (Oct 2026):** shipped — per-conversation hash-chained, identity-
+signed audit log (`AegisModeration.GroupAuditLog`); observing honest
+clients record invalid events (slow-mode bypass, unauthorized post) as
+`policyViolation` entries.
 **What.** Every administrative action — member add/remove, role change,
 permission edit, invite issued/revoked, export performed, recording consent,
 recovery events — is appended to a per-group, hash-chained, signed audit
@@ -618,6 +745,7 @@ in plaintext. Exporting the audit log requires admin role and is itself
 logged (turtles, but honest, all the way down).
 
 ### A44. Scheduled disappearing "briefing" channels ★ beyond parity
+**Status (Oct 2026):** spec-only — not implemented.
 **What.** Channels with a lifecycle: they open at a scheduled time, accept
 messages for a window (e.g., the 30-minute pre-market briefing), then
 auto-expire — all messages cryptographically wiped on every device at close,
@@ -645,6 +773,8 @@ no third party learns that communication happened. The trade-off is
 availability: no LAN, no sync; the outbox (A7) holds messages until peers
 are reachable. The UI shows a persistent "LAN only" indicator so users never
 mistake it for relay-backed chat.
+**Status (Oct 2026):** partial — the LAN-only network policy exists as a
+model enum; end-to-end enforcement was not verified in the implementation.
 
 ### A46. Account-less encrypted cloud backup (user-held key)
 **What.** Back up the encrypted database to *any* S3-compatible storage the
@@ -662,6 +792,10 @@ verification quiz before enabling. The storage endpoint learns backup size
 and timing only. Restoring to a new device triggers the re-verification
 ceremony (A40) for contacts, because a restore looks exactly like a
 compromise until proven otherwise.
+
+**Status (Oct 2026):** partial — Argon2id passphrase-encrypted key backup
+exists at the `AegisCrypto` layer (see CRYPTO.md §12); no app settings UI
+for creating/restoring backups was found.
 
 ### A47. Encrypted local database (SQLCipher) + encrypted full-text search
 **What.** All persistent state lives in SQLCipher (AES-256-CBC + HMAC)
@@ -693,3 +827,5 @@ history — without sending the query to any server.
 server to subpoena and no query log anywhere. Search respects tombstones and
 disappearing timers — expired content is unsearchable because it no longer
 exists.
+**Status (Oct 2026):** spec-only — no global search UI exists; the FTS5
+index it would be built on (A47) is shipped.

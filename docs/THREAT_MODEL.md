@@ -156,6 +156,18 @@ second channel (the LAN transport) is the mitigation.
   admin into promoting them, can still churn the roster — recipients have
   no independent way to verify who "should" be an admin. Treat unexpected
   membership changes as a signal to verify out-of-band.
+- **Granular permissions are enforced the same way.** Nine permissions
+  (post, invite, pin, manage threads, start voice rooms, record calls,
+  manage members, edit group info, approve join requests) are checked by
+  every honest client against the channel's signed permission policy
+  before acting; unauthorized attempts are rejected locally, and when
+  observed from a peer they are recorded as `policyViolation` entries in
+  the local hash-chained audit log — visible evidence, not prevention.
+  A modified client can still ignore the policy for its own behavior;
+  what it cannot do is forge another member's signature to escalate
+  itself, and honest clients will reject its unauthorized actions as
+  invalid events. Slow mode is enforced client-side from the same shared
+  group state.
 - **Identity-sealed sender-key distributions (AKD1).** When a member has
   no 1:1 session with a new joiner, the sender key is sealed to the
   joiner's long-term identity key rather than inside a 1:1 session
@@ -175,9 +187,59 @@ of encryption.
 
 ### 4.10 Voice rooms
 
-Voice rooms are full-mesh audio-only WebRTC: one peer connection per
-remote participant, signaled over the group's existing E2EE sender-key
-channel (join/leave/mute/deafen/heartbeat). Security properties:
+Voice rooms are full-mesh WebRTC (audio **and video** — shipped): one peer
+connection per remote participant, signaled over the group's existing E2EE
+sender-key channel (join/leave/mute/deafen/heartbeat). Every mesh peer
+connection negotiates a video m-line; the local video track stays disabled
+until the user enables the camera. Security properties:
+
+- **Media confidentiality** inherits the 1:1 call guarantees
+  (DTLS-SRTP per peer connection; §4.9). There is no SFU, so no middlebox
+  ever holds media keys. Membership-epoch rotation tears down every mesh
+  peer connection and rotates the DTLS identity, so re-established
+  connections handshake fresh SRTP keys (forward secrecy for membership
+  changes) — a departed member's client cannot decrypt subsequent audio
+  *or video*.
+- **Signal sender binding.** Every voice-room signal's claimed sender
+  fingerprint is bound to the Ed25519-authenticated sender of the
+  enclosing group control message; mismatches are dropped before
+  `VoiceRoomManager` sees them. Without this binding, a malicious group
+  member could forge join/offer signals attributed to another member
+  (the signal body is self-claimed JSON).
+- **Membership binding is social, not cryptographic.** A room's
+  participant list is whatever the group's sender-key channel says it
+  is. A malicious group member can invite an unlisted listener's client
+  to the mesh without other participants' clients knowing — the same
+  residual risk as a group member re-sharing plaintext (§4.8). The UI
+  shows the participant roster; treat unexpected participants as a
+  signal to verify.
+- **Mesh IP exposure.** Full-mesh WebRTC means every participant's IP
+  (STUN-reflexive or LAN) is visible to every other participant. There
+  is no TURN-relay option today; participants who need IP privacy from
+  each other should not join the same room.
+- **Presence metadata.** Join/leave/heartbeat signals reveal who is in
+  the room and when, to all members (and to the relay as opaque
+  ciphertext on the group routing mailbox).
+- **Mute/deafen are advisory.** A modified client can ignore another
+  participant's mute state and keep transmitting, or keep listening
+  while displaying "muted". The protocol cannot enforce client-side
+  audio policy. Per-user mute of a room peer is additionally
+  *local-only*: it disables the peer's `RTCAudioTrack` on this device
+  and is never signaled — nobody (including the peer) learns you muted
+  them.
+- **Speaking indicators are local-only.** They are computed from polled
+  WebRTC `audioLevel` statistics on this device and never transmitted;
+  no voice biometrics or energy levels leave the device.
+- **Stage mode is advisory.** The host election is deterministic (room
+  creator while present) and mode changes are authenticated group
+  signals — but "only the host may transmit" is enforced by honest
+  clients, not by the protocol. A modified client in a stage room can
+  transmit anyway; other clients will show it as unauthorized in the
+  audit log, not silence it.
+- **No per-room SAS ceremony.** The 1:1 SAS binds media keys for two
+  parties; rooms rely on the group channel's authentication instead.
+  A network adversary who compromises the signaling channel could MITM
+  room media the same way they could MITM group messages.
 
 - **Media confidentiality** inherits the 1:1 call guarantees
   (DTLS-SRTP per peer connection; §4.9). There is no SFU, so no middlebox
@@ -242,6 +304,65 @@ cryptographic operations.
 - **Availability coupling.** The linked device needs the primary
   reachable to send/receive. This is a deliberate usability tradeoff,
   documented in code (`DeviceLinkManager.swift`).
+- **Attachment/voice-note sync (`DeviceLinkBlobRelay`).** Media reaches a
+  linked device only through the primary acting as proxy: the primary
+  downloads the *ciphertext* blob from the relay, unwraps the file key
+  with its conversation keys, and sends the linked device a manifest
+  whose raw file key is sealed inside the paired envelope; the linked
+  device then pulls 32 KiB ciphertext chunks, reassembles, SHA-256-
+  verifies, and decrypts. **Security implications:** (i) the linked
+  device never sees conversation keys — only per-blob file keys —
+  so a linked-device compromise exposes synced blobs, not the
+  conversation; (ii) those file keys are only as secret as the paired
+  channel (static key, no forward secrecy — see above); (iii) the linked
+  device cannot fetch media on its own — it is a delegate, not an
+  independent endpoint. Linked → primary media sending is unavailable in
+  v1 (text only), which is a capability limit, not a security one.
+
+### 4.12 ReplayKit broadcast upload extension
+
+Full-device screen sharing runs through a separate broadcast upload
+extension process (`AegisBroadcastUpload`). The extension captures screen
+frames, downscales to 720p, JPEG-encodes, and writes `broadcast/latest.jpg`
+into the `group.app.aegis.ios` App Group shared container; the app watches
+a Darwin notification, decodes the JPEG, and feeds it into the call's
+`RTCVideoSource` — the peer receives the screen over the same DTLS-SRTP
+video track as in-app sharing.
+
+- **Frames are unencrypted at rest in the shared container.** The container
+  is sandbox-scoped to the app group (the app + the extension), but it is
+  not the Keychain and it is not encrypted by Aegis: anything else running
+  inside the app group could read it. In practice that means a jailbroken
+  device, or (on a signed device) another app from the same team ID
+  holding the same group entitlement. This is a platform-architecture
+  tradeoff: there is no other way to move frames between an extension
+  process and its host app.
+- **The extension is dependency-free by policy** (no WebRTC, no Aegis
+  packages): it performs view-only pixel reads — there is no remote-
+  control channel anywhere in this pipeline.
+- **OS consent is never suppressed.** Starting the broadcast requires the
+  system's own broadcast picker/consent UI, and iOS shows its recording
+  indicator while the extension is live.
+- **Not installable on the iOS simulator** (platform limitation). It
+  compiles and ships on device builds; CI strips the `.appex` from
+  simulator builds.
+
+### 4.13 Simulator keychain fallback (dev-only)
+
+On **unsigned simulator builds only**, the iOS Keychain is unreachable
+(`errSecMissingEntitlement` on every `SecItem*` call — no signing
+identity, and no accessibility constant fixes that), so `DatabaseKeyManager`
+falls back to a 0600 file under Application Support. Security posture:
+
+- **Fail-closed everywhere else.** Any other keychain error stays
+  fail-closed; corrupt key files throw rather than minting over an
+  existing database. Signed simulator runs and all device builds use the
+  exact production Keychain path.
+- **Dev-machine threat model.** On a developer's machine, anyone with the
+  user's login can read the 0600 key file. This is acceptable because
+  simulator builds are never distributed and CI uses them only for test
+  data — it is a development-environment tradeoff, not a device security
+  change. Real user databases (device builds) are unaffected.
 
 ## 5. Endpoint security posture
 
@@ -251,7 +372,8 @@ cryptographic operations.
 | No Secure Enclave | Stated plainly: the Enclave supports P-256, not Ed25519/X25519; keys live in Keychain, not the Enclave |
 | Memory | `SecureBytes` best-effort wipe; chain keys in opaque handles; no key material in logs/crash reports |
 | Backup | Argon2id + AES-256-GCM; wrong password indistinguishable from corruption |
-| Screenshots | The app should block screenshots on safety-number/QR screens (UI workstream) |
+| Screenshots | Screenshot alerts + app-switcher snapshot shield (`PrivacyController`) |
+| Simulator builds | Keychain unreachable on unsigned simulator builds → 0600 key file under Application Support, **dev-only** (see §4.13); device builds untouched |
 
 ## 6. The verification imperative
 

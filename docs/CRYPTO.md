@@ -307,6 +307,18 @@ SAS ceremony, so the media-path-MITM defense there rests on the E2EE
 signaling channel alone. Group calls start
 as full-mesh WebRTC; an SFU with SFrame is the documented scaling path
 (see `docs/NETWORKING.md`, owned by the transport workstream).
+**Video in rooms (shipped).** Every mesh peer connection negotiates a
+video m-line; the local video track stays disabled until the user
+enables the camera. Room video inherits the same DTLS-SRTP protection as
+audio (fresh DTLS certificate and fresh SRTP keys on every membership-
+epoch rotation). Screen sharing in 1:1 calls re-keys the video stream;
+full-device capture uses the `AegisBroadcastUpload` ReplayKit broadcast
+upload extension, which writes downscaled 720p JPEG frames into the
+`group.app.aegis.ios` App Group shared container; the app decodes them
+and feeds them into the call's `RTCVideoSource`, so the peer receives the
+screen over the same DTLS-SRTP video track as in-app sharing. The
+extension keeps no dependencies and performs view-only pixel reads — no
+remote-control channel exists.
 
 ## 12. Key backup
 
@@ -460,6 +472,104 @@ Two mailbox layers exist:
     the current *and* previous epoch's mailbox (matching the crypto
     layer's epoch grace window) so a membership change never partitions
     the group mid-adoption.
+
+## 20. Messaging-richness wire events (app layer)
+
+**Location correction.** The message-level wire events (replies, reactions,
+threads, polls, ballots, pins, edits, deletes) are defined in the *app
+target*, `Aegis/Support/WirePayload.swift` — not in `Packages/AegisCrypto`.
+They are JSON payloads carried *inside* the AEAD channels of §§6–8 (the
+Double-Ratchet or sender-key ciphertext), so they inherit per-message
+forward secrecy and AEAD authenticity. `AegisCrypto` contributes only the
+Ed25519 identity-signing seam (`CryptoService.signWithIdentity`) and the
+verification path. This layering is deliberate: message semantics belong
+to the app, key material to the crypto package.
+
+Wire kinds (`WirePayload.Kind`): `text` (extended with `quote`
+frozen `QuoteSnapshot`, `threadRootID`, `disappearAfterRead`), `poll`
+(`pollQuestion`, `pollOptions`, `pollAllowsMultipleChoice`, `pollAnonymous`,
+`pollClosesAt`, `pollEligibleVoterCount`), `ballot` (`ballotChoices:
+[Int]`, `targetMessageID` = the poll), `pin` / `unpin`
+(`targetMessageID`, `pinExpiresAt`), plus the pre-existing `reaction`,
+`edit`, `delete`, `readReceipt`, `typing`, `screenshotNotice`.
+
+**Signed events.** `reaction`, `edit`, `delete`, `ballot`, `pin`, `unpin`
+carry an Ed25519 identity signature over `signableBytes()` — a
+domain-separated canonical encoding (`AegisMsgEventSig_v1|version|kind|…`)
+so a signature cannot be replayed as a different event kind. The AEAD
+channel authenticates the session; the identity signature additionally
+binds the event to the long-term identity key, so events stay attributable
+across session resets. Unsigned or badly-signed gated events are dropped
+on receipt.
+
+**Authorization (on top of the signature).** Edits and deletes are applied
+only when the signer is the message's author; pins only when the pinner's
+role may pin (anyone in 1:1, moderators+ in groups/channels). These checks
+are enforced by every honest client from the signed group state — see
+THREAT_MODEL.md §4.8 (roles remain advisory, not cryptographic).
+
+**Signed tombstones.** `delete` issues a signed tombstone that propagates
+to all participants and devices; the tombstone replaces content but
+preserves the message's position and metadata shell. Only the author (or a
+group admin, where policy allows) can tombstone; tombstones are signed, so
+a peer cannot forge deletions of messages they did not send. Local
+deletion also wipes out-of-band secrets first (Keychain-wrapped file
+keys, cached attachment files) before expunging the row
+(`disappearedMessages(now:)` drives the same path for timer expiry).
+
+**Polls.** Tallies are computed client-side from signed ballots; invalid
+ballots (double votes, closed polls, out-of-range choices) are ignored.
+Non-anonymous polls record voter identity to members only. Anonymous polls
+hide the voter→choice mapping from everyone (including admins) but keep
+the *set* of voters visible, so ballot-stuffing is detectable — and
+anonymous votes cannot be changed. `closesAt` is enforced on send and on
+receipt. Quorum display ("3 of 5 voted") derives from
+`pollEligibleVoterCount`.
+
+## 21. Linked-device blob relay (media sync)
+
+Attachments and voice notes sync to linked devices through
+`DeviceLinkBlobRelay`, riding the §17 paired channel (AES-GCM under the
+static channel key — the no-forward-secrecy caveat of §17 applies to
+blobs too). The primary downloads the *ciphertext* blob from the relay,
+unwraps the file key with its conversation keys, and sends the linked
+device a `LinkedBlobManifest` (manifest + raw file key sealed inside the
+paired envelope). On tap, the linked device requests 32 KiB indexed
+ciphertext chunks; the primary streams them, each sealed by the paired
+channel's AES-GCM; the linked device reassembles, SHA-256-verifies, and
+decrypts with the manifest's file key via `AttachmentCrypto` — the same
+framing as the direct relay path. Chunks are indexed and persisted, so
+downloads resume from the first missing chunk across reconnects and
+relaunches; a manifest offer missed while offline parks the download and
+resumes on re-offer. **Security properties:** (i) the linked device never
+sees conversation keys — only per-blob file keys; (ii) the manifest's
+file key is only as secret as the paired channel (static, no FS); (iii)
+the primary must be reachable — the linked device cannot fetch media on
+its own (text-first relay architecture, documented honestly).
+
+## 22. Simulator keychain fallback (first-launch fix)
+
+On **unsigned simulator builds only** (`#if targetEnvironment(simulator)`)
+the iOS Keychain is unreachable: every `SecItem*` call fails with
+`errSecMissingEntitlement` (−34018) because there is no signing identity
+to authorize, and no accessibility constant can fix an unsigned binary.
+Previously this surfaced as a fail-closed launch failure on fresh
+simulators. The fix (`DatabaseKeyManager`): **only** when running on the
+simulator **and** only on `errSecMissingEntitlement`, the database key
+falls back to a 0600 file under Application Support. Rationale, stated
+as policy:
+
+- Any other keychain error stays fail-closed (no silent downgrade).
+- Corrupt or missing key files throw rather than minting a new key over
+  an existing database (`simulatorStorageFailed` — the "mint over an
+  existing DB" hole is explicitly rejected).
+- Signed simulator runs and all device builds keep the exact production
+  Keychain path; device behavior is untouched.
+- Threat-model implication (see THREAT_MODEL.md §5): on a dev machine,
+  anyone with the user's login can read the 0600 key file — which is
+  acceptable because simulator builds are development-only, never
+  distribution, and CI uses them only for test data. This is a
+  development-environment tradeoff, not a device security change.
 
 ## References
 
