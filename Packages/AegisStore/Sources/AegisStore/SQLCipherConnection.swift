@@ -286,7 +286,7 @@ final class SQLCipherConnection {
             do {
                 try execRaw(StoreSchema.v1)
                 try execRaw(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (1, \(Date().timeIntervalSince1970));"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, \(Date().timeIntervalSince1970));"
                 )
                 try setVersion(1)
                 try exec("COMMIT;")
@@ -301,7 +301,7 @@ final class SQLCipherConnection {
             do {
                 try execRaw(StoreSchema.v2)
                 try execRaw(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (2, \(Date().timeIntervalSince1970));"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, \(Date().timeIntervalSince1970));"
                 )
                 try setVersion(2)
                 try exec("COMMIT;")
@@ -315,7 +315,7 @@ final class SQLCipherConnection {
             do {
                 try execRaw(StoreSchema.v3)
                 try execRaw(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (3, \(Date().timeIntervalSince1970));"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, \(Date().timeIntervalSince1970));"
                 )
                 try setVersion(3)
                 try exec("COMMIT;")
@@ -329,7 +329,7 @@ final class SQLCipherConnection {
             do {
                 try migrateV4Idempotent()
                 try execRaw(
-                    "INSERT INTO schema_migrations(version, applied_at) VALUES (4, \(Date().timeIntervalSince1970));"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, \(Date().timeIntervalSince1970));"
                 )
                 try setVersion(4)
                 try exec("COMMIT;")

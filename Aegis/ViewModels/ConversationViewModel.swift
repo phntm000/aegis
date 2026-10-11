@@ -477,7 +477,7 @@ final class ConversationViewModel: ObservableObject {
             // Keep the ciphertext staged until the message sends.
             try? FileManager.default.removeItem(at: staged)
             failedUploads.removeAll { $0.id == attachmentID }
-            await sendText(body: nil, replyToID: nil, attachment: attachment, voiceNote: nil)
+            await sendText(body: nil, replyToID: nil, quote: nil, threadRootID: nil, attachment: attachment, voiceNote: nil)
         } catch {
             transfers[attachmentID] = .failed(error.localizedDescription)
             // The staged source survives for retry; the composer offers it.
@@ -536,7 +536,7 @@ final class ConversationViewModel: ObservableObject {
             try? FileManager.default.removeItem(at: staged)
             transfers[noteID] = .done
             failedUploads.removeAll { $0.id == noteID }
-            await sendText(body: nil, replyToID: nil, attachment: nil, voiceNote: voiceNote)
+            await sendText(body: nil, replyToID: nil, quote: nil, threadRootID: nil, attachment: nil, voiceNote: voiceNote)
         } catch {
             transfers[noteID] = .failed(error.localizedDescription)
             let pending = PendingUpload(
@@ -980,7 +980,7 @@ final class ConversationViewModel: ObservableObject {
             isFromMe: true,
             body: nil,
             status: .sending,
-            expiresAt: afterRead ? nil : expiresIn ?? conversation.disappearingInterval.map { Date().addingTimeInterval($0) },
+            expiresAt: afterRead ? nil : (expiresIn ?? conversation.disappearingInterval).map { Date().addingTimeInterval($0) },
             disappearAfterReadInterval: afterRead ? (expiresIn ?? conversation.disappearingInterval) : nil,
             poll: poll,
             sentAt: Date()
