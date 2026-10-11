@@ -22,6 +22,18 @@ struct IdentitySettingsView: View {
 
     var body: some View {
         List {
+            if viewModel.identity == nil, let loadError = viewModel.error {
+                // Identity failed to load: surface the failure with a retry
+                // instead of an empty header.
+                Section {
+                    ErrorBannerView(message: loadError, onDismiss: { viewModel.error = nil })
+                    Button("Retry") {
+                        Task { @MainActor in await viewModel.load() }
+                    }
+                    .accessibilityLabel("Retry loading identity")
+                }
+            }
+
             Section {
                 VStack(spacing: AegisLayout.m) {
                     if let identity = viewModel.identity {
@@ -36,6 +48,7 @@ struct IdentitySettingsView: View {
                             }
                             .font(AegisType.callout)
                             .foregroundStyle(AegisColors.accent)
+                            .aegisMinimumTapTarget()
                             .accessibilityLabel("Edit display name")
                         }
                         Text(identity.shortHandle)
@@ -56,7 +69,8 @@ struct IdentitySettingsView: View {
                     .foregroundStyle(AegisColors.textPrimary)
                     .textSelection(.enabled)
                     .padding(.vertical, AegisLayout.xs)
-                    .accessibilityLabel("Identity fingerprint")
+                    // No label override: the section header says "Fingerprint",
+                    // and VoiceOver should read the actual value.
             } header: {
                 Text("Fingerprint")
             } footer: {
@@ -82,6 +96,7 @@ struct IdentitySettingsView: View {
                     }
                     .font(AegisType.callout)
                     .foregroundStyle(AegisColors.accent)
+                    .aegisMinimumTapTarget()
                     .accessibilityLabel("Copy invite code")
                 }
                 if !viewModel.inviteCode.isEmpty {

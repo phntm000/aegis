@@ -105,6 +105,7 @@ struct AddContactView: View {
                                     }
                                     .font(AegisType.callout)
                                     .foregroundStyle(AegisColors.accent)
+                                    .aegisMinimumTapTarget()
                                     .accessibilityLabel("Copy my invite code")
                                 }
                                 .padding(AegisLayout.m)
@@ -118,6 +119,14 @@ struct AddContactView: View {
                                 Spacer()
                             }
                             .accessibilityLabel("Preparing invite code")
+                        } else {
+                            // Identity not loaded (defensive): never a blank section.
+                            Text("Your invite isn't available yet — your identity is still loading.")
+                                .font(AegisType.caption)
+                                .foregroundStyle(AegisColors.textSecondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, AegisLayout.m)
                         }
                     }
                 }

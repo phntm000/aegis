@@ -34,8 +34,11 @@ struct LinkDeviceOnboardingView: View {
                             .foregroundStyle(AegisColors.accent)
                         Button("Start messaging") { dismiss() }
                             .buttonStyle(.borderedProminent)
+                            .tint(AegisColors.accent)
+                            .frame(minHeight: AegisLayout.minTapTarget)
                     } else {
                         ProgressView()
+                            .accessibilityLabel("Waiting for confirmation on your primary device")
                         Text("Waiting for confirmation on your primary device…")
                             .font(AegisType.caption)
                             .foregroundStyle(AegisColors.textSecondary)
@@ -52,11 +55,14 @@ struct LinkDeviceOnboardingView: View {
                         .multilineTextAlignment(.center)
                     Button("Scan QR code") { showingScanner = true }
                         .buttonStyle(.borderedProminent)
+                        .tint(AegisColors.accent)
+                        .frame(minHeight: AegisLayout.minTapTarget)
                 }
                 if let error {
                     Text(error)
                         .font(AegisType.caption)
                         .foregroundStyle(AegisColors.danger)
+                        .accessibilityLabel("Error: \(error)")
                 }
                 Spacer()
             }
