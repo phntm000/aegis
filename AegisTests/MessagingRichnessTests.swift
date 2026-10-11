@@ -160,13 +160,13 @@ final class MessagingRichnessTests: XCTestCase {
     // MARK: - Quote snapshots
 
     func testQuoteSnapshotFallbackText() {
-        let text = QuoteSnapshot(senderID: UUID(), senderName: "Maya", bodyExcerpt: "hello there", sentAt: Date())
+        let text = Aegis.QuoteSnapshot(senderID: UUID(), senderName: "Maya", bodyExcerpt: "hello there", sentAt: Date())
         XCTAssertEqual(text.fallbackText, "hello there")
-        let poll = QuoteSnapshot(senderID: UUID(), senderName: "Maya", isPoll: true, sentAt: Date())
+        let poll = Aegis.QuoteSnapshot(senderID: UUID(), senderName: "Maya", isPoll: true, sentAt: Date())
         XCTAssertEqual(poll.fallbackText, "📊 Poll")
-        let voice = QuoteSnapshot(senderID: UUID(), senderName: "Maya", hasVoiceNote: true, sentAt: Date())
+        let voice = Aegis.QuoteSnapshot(senderID: UUID(), senderName: "Maya", hasVoiceNote: true, sentAt: Date())
         XCTAssertEqual(voice.fallbackText, "🎤 Voice note")
-        let attachment = QuoteSnapshot(senderID: UUID(), senderName: "Maya", hasAttachment: true, sentAt: Date())
+        let attachment = Aegis.QuoteSnapshot(senderID: UUID(), senderName: "Maya", hasAttachment: true, sentAt: Date())
         XCTAssertEqual(attachment.fallbackText, "📎 Attachment")
     }
 
@@ -174,12 +174,12 @@ final class MessagingRichnessTests: XCTestCase {
         // The snapshot is a frozen copy: encoding it and decoding it back
         // (as the wire/store do) preserves the quoted text even though the
         // original message is gone.
-        let snapshot = QuoteSnapshot(
+        let snapshot = Aegis.QuoteSnapshot(
             senderID: UUID(), senderName: "Maya",
             bodyExcerpt: "meet at 8", sentAt: Date()
         )
         let roundTripped = try JSONDecoder().decode(
-            QuoteSnapshot.self, from: JSONEncoder().encode(snapshot)
+            Aegis.QuoteSnapshot.self, from: JSONEncoder().encode(snapshot)
         )
         XCTAssertEqual(roundTripped.bodyExcerpt, "meet at 8")
         XCTAssertEqual(roundTripped.senderName, "Maya")
