@@ -6,6 +6,14 @@ import SwiftUI
 /// large-title mode): large titles are laid out around scrollable content,
 /// and on this static VStack the expanded title area was never reserved —
 /// the title was drawn over the welcome hero instead of above it.
+///
+/// There is deliberately no NavigationStack here. The flow is a linear
+/// stepper driven by `viewModel.step` — nothing pushes or pops — and a
+/// stack with a hidden navigation bar lays its content out from the top
+/// edge of the screen with no top safe-area inset, which left the step
+/// title clipped under the status bar. As a plain root view the VStack
+/// honors the standard safe-area inset on every iOS version, at every
+/// Dynamic Type size, in both appearances.
 struct OnboardingFlowView: View {
     @StateObject private var viewModel: OnboardingViewModel
     @EnvironmentObject private var appState: AppState
@@ -15,41 +23,38 @@ struct OnboardingFlowView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                progressHeader
-                    .padding(.horizontal, AegisLayout.l)
-                    .padding(.top, AegisLayout.s)
+        VStack(spacing: 0) {
+            progressHeader
+                .padding(.horizontal, AegisLayout.l)
+                .padding(.top, AegisLayout.s)
 
-                stepTitle
+            stepTitle
 
-                Group {
-                    switch viewModel.step {
-                    case .welcome:
-                        WelcomeView(onContinue: viewModel.next)
-                    case .identity:
-                        IdentityGenerationView(viewModel: viewModel)
-                    case .backup:
-                        BackupPassphraseView(viewModel: viewModel)
-                    case .addContact:
-                        AddFirstContactView(viewModel: viewModel)
-                    }
+            Group {
+                switch viewModel.step {
+                case .welcome:
+                    WelcomeView(onContinue: viewModel.next)
+                case .identity:
+                    IdentityGenerationView(viewModel: viewModel)
+                case .backup:
+                    BackupPassphraseView(viewModel: viewModel)
+                case .addContact:
+                    AddFirstContactView(viewModel: viewModel)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                footerControls
-                    .padding(.horizontal, AegisLayout.l)
-                    .padding(.bottom, AegisLayout.l)
+            footerControls
+                .padding(.horizontal, AegisLayout.l)
+                .padding(.bottom, AegisLayout.l)
+        }
+        .background(AegisColors.background.ignoresSafeArea())
+        .alert("Couldn't load identity", isPresented: bootstrapErrorPresented) {
+            Button("Start fresh", role: .destructive) {
+                appState.bootstrapError = nil
             }
-            .background(AegisColors.background.ignoresSafeArea())
-            .toolbar(.hidden, for: .navigationBar)
-            .alert("Couldn't load identity", isPresented: bootstrapErrorPresented) {
-                Button("Start fresh", role: .destructive) {
-                    appState.bootstrapError = nil
-                }
-            } message: {
-                Text(appState.bootstrapError ?? "")
-            }
+        } message: {
+            Text(appState.bootstrapError ?? "")
         }
     }
 
