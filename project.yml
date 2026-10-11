@@ -29,6 +29,10 @@ packages:
     path: Packages/AegisStore
   WebRTCBridge:
     path: Packages/WebRTCBridge
+  # Added by the multidevice-v2 stream (merged from main): linked-device
+  # blob transfer package. Kept here so this branch doesn't revert it.
+  AegisDeviceLink:
+    path: Packages/AegisDeviceLink
 
 targets:
   Aegis:
@@ -55,6 +59,10 @@ targets:
       - package: AegisStore
         products:
           - AegisStore
+      # Merged from main (multidevice-v2 stream); do not drop.
+      - package: AegisDeviceLink
+        products:
+          - AegisDeviceLink
       - package: WebRTCBridge
         products:
           - WebRTCBridge
