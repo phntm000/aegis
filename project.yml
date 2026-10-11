@@ -50,6 +50,21 @@ targets:
           - "**/*.md"
     entitlements:
       path: Aegis/Aegis.entitlements
+    # ReplayKit broadcast upload extensions cannot install on the iOS
+    # simulator (platform limitation, confirmed across independent
+    # projects — the simulator installer has no placeholder path for this
+    # extension point). The extension still builds for simulator (proving
+    # it compiles), but it is stripped from the app bundle so `xcodebuild
+    # test`, the screenshot workflow, and the launch smoke test install
+    # cleanly. Device builds keep it. The app degrades gracefully:
+    # broadcastShareSupported is false without the appex and the UI offers
+    # in-app sharing only — never a dead button.
+    postBuildScripts:
+      - name: Strip broadcast extension on simulator
+        script: |
+          if [ "${EFFECTIVE_PLATFORM_NAME}" = "-iphonesimulator" ]; then
+            rm -rf "${TARGET_BUILD_DIR}/${FULL_PRODUCT_NAME}/PlugIns/AegisBroadcastUpload.appex"
+          fi
     dependencies:
       - target: AegisBroadcastUpload
       - package: AegisCrypto
