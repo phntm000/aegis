@@ -31,9 +31,13 @@ protocol VoiceRoomService: Sendable {
     func setSpeakerApproval(fingerprintHex: String, approved: Bool) async
     /// This side's WebRTC session UUID for a peer (video sinks).
     func videoCallID(for fingerprintHex: String) async -> UUID?
-    /// Local camera preview plumbing for the room UI.
-    func attachLocalPreview(_ renderer: RTCVideoRenderer) async
-    func detachLocalPreview(_ renderer: RTCVideoRenderer) async
+    /// Local camera preview plumbing for the room UI. Takes the renderer
+    /// boxed as `SendableVideoRenderer`: the raw `RTCVideoRenderer`
+    /// protocol is not Sendable and cannot cross actor isolations as a
+    /// `sending` argument (see SendableVideoRenderer for why the box is
+    /// sound under WebRTC's threading contract).
+    func attachLocalPreview(_ renderer: SendableVideoRenderer) async
+    func detachLocalPreview(_ renderer: SendableVideoRenderer) async
 }
 
 // MARK: - DeviceLinkService

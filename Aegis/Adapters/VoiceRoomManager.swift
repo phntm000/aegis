@@ -325,14 +325,6 @@ actor VoiceRoomManager {
         emit()
     }
 
-    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {
-        await mediaControl()?.attachLocalVideoRenderer(renderer)
-    }
-
-    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {
-        await mediaControl()?.detachLocalVideoRenderer(renderer)
-    }
-
     // MARK: - Per-user mute
 
     /// Mutes/unmutes one participant locally (their audio track is disabled

@@ -1378,11 +1378,11 @@ final class AppState: ObservableObject {
     }
 
     func attachVoiceRoomLocalPreview(_ renderer: RTCVideoRenderer) async {
-        await voiceRoom.attachLocalPreview(renderer)
+        await voiceRoom.attachLocalPreview(SendableVideoRenderer(renderer: renderer))
     }
 
     func detachVoiceRoomLocalPreview(_ renderer: RTCVideoRenderer) async {
-        await voiceRoom.detachLocalPreview(renderer)
+        await voiceRoom.detachLocalPreview(SendableVideoRenderer(renderer: renderer))
     }
 
     // MARK: - Linked devices

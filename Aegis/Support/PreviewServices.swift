@@ -153,9 +153,9 @@ final class MockVoiceRoom: VoiceRoomService, @unchecked Sendable {
 
     func videoCallID(for fingerprintHex: String) async -> UUID? { nil }
 
-    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {}
+    func attachLocalPreview(_ renderer: SendableVideoRenderer) async {}
 
-    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {}
+    func detachLocalPreview(_ renderer: SendableVideoRenderer) async {}
 }
 
 // MARK: - Mock device link (inert)

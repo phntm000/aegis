@@ -1237,18 +1237,15 @@ struct LiveVoiceRoomService: VoiceRoomService {
         await core.voiceRooms.videoCallID(for: fingerprintHex)
     }
 
-    func attachLocalPreview(_ renderer: RTCVideoRenderer) async {
+    func attachLocalPreview(_ box: SendableVideoRenderer) async {
         // NOTE: the renderer never crosses an actor boundary as an
         // argument — voiceRoomMediaControl() is fetched first (the only
-        // isolation hop), then the engine is driven synchronously. This
-        // keeps the non-Sendable RTCVideoRenderer off Swift 6's `sending`
-        // path; the engine's use of the renderer follows WebRTC's own
-        // threading contract.
-        await core.voiceRoomMediaControl()?.attachLocalVideoRenderer(renderer)
+        // isolation hop), then the engine is driven synchronously.
+        await core.voiceRoomMediaControl()?.attachLocalVideoRenderer(box.renderer)
     }
 
-    func detachLocalPreview(_ renderer: RTCVideoRenderer) async {
-        await core.voiceRoomMediaControl()?.detachLocalVideoRenderer(renderer)
+    func detachLocalPreview(_ box: SendableVideoRenderer) async {
+        await core.voiceRoomMediaControl()?.detachLocalVideoRenderer(box.renderer)
     }
 }
 
