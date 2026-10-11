@@ -51,5 +51,7 @@ protocol DeviceLinkService: Sendable {
     /// Sends a sync message over the paired channel (to the primary when
     /// linked; fanned out to linked devices when primary).
     func sendSync(kind: DeviceSyncKind, body: Data) async throws
+    /// Sends a sync message to one specific paired device (chunk streams).
+    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws
     func unpair(deviceID: UUID) async
 }

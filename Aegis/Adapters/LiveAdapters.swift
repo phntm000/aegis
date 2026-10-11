@@ -217,6 +217,14 @@ struct LiveCryptoService: CryptoService {
         try AttachmentCrypto.decryptFile(at: ciphertextURL, key: SymmetricKey(data: fileKeyData), to: destinationURL)
     }
 
+    /// Raw file key for provisioning linked devices over the paired
+    /// channel. Reads the Keychain cache populated at send/receipt time
+    /// (see noteFileKey) — the wrapped key itself may no longer unwrap
+    /// after sender-key rotations, but the cached raw key stays valid.
+    func fileKey(forWrappedKey wrappedKey: Data) async -> Data? {
+        await core.fileKey(forWrappedKey: wrappedKey)
+    }
+
     // MARK: Backup
 
     func exportEncryptedBackup(passphrase: String) async throws -> Data {
@@ -1060,6 +1068,10 @@ struct LiveDeviceLinkService: DeviceLinkService {
 
     func sendSync(kind: DeviceSyncKind, body: Data) async throws {
         try await core.deviceLink.sendSync(kind: kind, body: body)
+    }
+
+    func sendSync(to deviceID: UUID, kind: DeviceSyncKind, body: Data) async throws {
+        try await core.deviceLink.sendSync(to: deviceID, kind: kind, body: body)
     }
 
     func unpair(deviceID: UUID) async {
