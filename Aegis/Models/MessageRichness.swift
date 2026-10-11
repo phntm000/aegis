@@ -16,13 +16,13 @@ struct QuoteSnapshot: Codable, Sendable, Hashable {
     var senderName: String
     /// Excerpt of the quoted body (first ~140 chars), nil for media-only.
     var bodyExcerpt: String?
-    var hasAttachment: Bool
-    var hasVoiceNote: Bool
-    var isPoll: Bool
+    var hasAttachment: Bool = false
+    var hasVoiceNote: Bool = false
+    var isPoll: Bool = false
     var sentAt: Date
     /// The quoted message's own expiry, if it was disappearing. The quote
     /// inherits it: quoting doesn't resurrect content the timer killed.
-    var expiresAt: Date?
+    var expiresAt: Date? = nil
 
     var fallbackText: String {
         if let bodyExcerpt, !bodyExcerpt.isEmpty { return bodyExcerpt }

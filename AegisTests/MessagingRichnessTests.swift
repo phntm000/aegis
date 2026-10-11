@@ -293,8 +293,8 @@ final class MessagingRichnessTests: XCTestCase {
     }
 
     func testThreadSummaryValueSemantics() {
-        let a = ThreadSummary(replyCount: 3, lastActivityAt: Date())
-        let b = ThreadSummary(replyCount: 3, lastActivityAt: a.lastActivityAt)
+        let a = Aegis.ThreadSummary(replyCount: 3, lastActivityAt: Date())
+        let b = Aegis.ThreadSummary(replyCount: 3, lastActivityAt: a.lastActivityAt)
         XCTAssertEqual(a, b)
         XCTAssertEqual(a.hashValue, b.hashValue)
     }
