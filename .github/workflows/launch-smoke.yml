@@ -1,0 +1,136 @@
+# Aegis launch smoke test
+#
+# Boots the REAL store path on a fresh simulator and fails the job if the
+# fail-closed recovery view appears instead of the real UI. This is the
+# regression net for the first-launch bug where an unsigned simulator build
+# could never get past "Aegis couldn't start": the Keychain is unreachable
+# for unsigned binaries (errSecMissingEntitlement on every SecItem* call),
+# so DatabaseKeyManager.databaseKey() threw on every launch — and CI's
+# xcodebuild tests never exercise this path because Bootstrap swaps in the
+# preview factory under XCTest.
+#
+# The simulator is erased first (true first-launch state), the app is
+# launched, then terminated and relaunched (retry path: the database key
+# must persist across launches). Each launch is screenshotted in a poll
+# loop and OCR'd with tesseract: the job fails if the recovery-view text
+# appears, if the onboarding UI text never appears, or if the UI never
+# settles (e.g. a launch crash).
+
+name: Launch smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  XCODE_APP: /Applications/Xcode_16.2.app
+  SIM_DEVICE: iPhone 16
+  BUNDLE_ID: app.aegis.ios
+
+jobs:
+  launch-smoke:
+    name: First-launch smoke (real store path)
+    runs-on: macos-14
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      - name: Install XcodeGen and tesseract
+        run: brew install xcodegen tesseract
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app for simulator (unsigned, like CI)
+        run: >
+          xcodebuild build
+          -project Aegis.xcodeproj
+          -scheme Aegis
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+          -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Erase simulator (fresh first-launch state)
+        run: |
+          set -u
+          xcrun simctl shutdown "$SIM_DEVICE" 2>/dev/null || true
+          xcrun simctl erase "$SIM_DEVICE"
+          xcrun simctl boot "$SIM_DEVICE"
+          xcrun simctl bootstatus "$SIM_DEVICE" -b
+
+      - name: Install and launch (first launch)
+        run: |
+          set -u
+          APP_PATH=$(ls -d build/Build/Products/Debug-iphonesimulator/Aegis.app)
+          echo "Installing $APP_PATH"
+          xcrun simctl install booted "$APP_PATH"
+          echo "Launching $BUNDLE_ID (first launch)"
+          xcrun simctl launch booted "$BUNDLE_ID"
+
+      - name: Assert real UI on first launch and relaunch
+        run: |
+          set -u
+
+          # Screenshots the booted simulator each round until the UI settles
+          # into a recognizable state. Prints one of: ONBOARDING (real UI),
+          # RECOVERY (fail-closed "Aegis couldn't start" view), TIMEOUT.
+          wait_for_settled_ui() {
+            local shot="$1" i text
+            for i in $(seq 1 18); do
+              sleep 5
+              xcrun simctl io booted screenshot "$shot"
+              text=$(tesseract "$shot" stdout 2>/dev/null || true)
+              if echo "$text" | grep -qiE "couldn.?t start"; then
+                echo "RECOVERY"
+                return 0
+              fi
+              if echo "$text" | grep -qi "private by architecture"; then
+                echo "ONBOARDING"
+                return 0
+              fi
+            done
+            echo "TIMEOUT"
+          }
+
+          fail=0
+          check() { # $1 = label, $2 = settled state
+            echo "$1 settled: $2"
+            if [ "$2" != "ONBOARDING" ]; then
+              echo "FAIL: $1 did not reach the real UI (got $2)"
+              fail=1
+            fi
+          }
+
+          echo "--- first launch ---"
+          check "first launch" "$(wait_for_settled_ui smoke-01-first-launch.png)"
+
+          echo "--- terminate + relaunch (retry path) ---"
+          xcrun simctl terminate booted "$BUNDLE_ID" || true
+          sleep 3
+          xcrun simctl launch booted "$BUNDLE_ID"
+          check "relaunch" "$(wait_for_settled_ui smoke-02-relaunch.png)"
+
+          if [ "$fail" -ne 0 ]; then
+            echo "Launch smoke test FAILED"
+            exit 1
+          fi
+          echo "Launch smoke test PASSED: real store path reached the app UI on first launch and relaunch."
+
+      - name: Dump app log tail (diagnostic)
+        if: always()
+        run: |
+          xcrun simctl spawn booted log show --style compact --predicate 'process == "Aegis"' --last 10m 2>/dev/null | tail -40 || echo "log unavailable"
+
+      - name: Upload screenshots (diagnostic)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-smoke-screenshots
+          path: smoke-*.png
+          if-no-files-found: error
