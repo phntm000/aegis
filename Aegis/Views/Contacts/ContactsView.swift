@@ -19,6 +19,11 @@ struct ContactsView: View {
             Group {
                 if viewModel.isLoading {
                     LoadingOverlayView(label: "Loading contacts…")
+                } else if let loadError = viewModel.error, viewModel.contacts.isEmpty {
+                    // A load failure is not an empty address book — surface it.
+                    ErrorStateView(message: loadError) {
+                        Task { @MainActor in await viewModel.load() }
+                    }
                 } else if viewModel.isEmpty {
                     EmptyStateView(
                         icon: "person.2",
@@ -167,6 +172,7 @@ struct ContactDetailView: View {
                         Button("Rename") { newName = contact.displayName; showingRename = true }
                             .font(AegisType.callout)
                             .foregroundStyle(AegisColors.accent)
+                            .aegisMinimumTapTarget()
                     }
                     .padding(.vertical, AegisLayout.s)
                 }

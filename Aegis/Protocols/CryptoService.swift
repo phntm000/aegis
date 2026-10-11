@@ -95,6 +95,12 @@ protocol CryptoService: Sendable {
         nonce: Data,
         to destinationURL: URL
     ) async throws
+    /// Raw 32-byte file key for an attachment's wrapped key, when this
+    /// device can unwrap it (the primary). Used to provision linked devices
+    /// over the paired channel: the manifest carries the raw key sealed
+    /// inside the paired envelope. Returns nil when the key is unavailable
+    /// (linked secondaries have no conversation keys — always nil there).
+    func fileKey(forWrappedKey wrappedKey: Data) async -> Data?
 
     // MARK: Encrypted backup
 

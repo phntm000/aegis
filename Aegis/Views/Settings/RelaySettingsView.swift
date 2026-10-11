@@ -84,11 +84,12 @@ struct RelaySettingsView: View {
                             if mode == option {
                                 Image(systemName: "checkmark")
                                     .foregroundStyle(AegisColors.accent)
-                                    .accessibilityLabel("Selected")
+                                    .accessibilityHidden(true)
                             }
                         }
                     }
                     .accessibilityLabel("\(modeTitle(option)) relay mode")
+                    .accessibilityAddTraits(mode == option ? .isSelected : [])
                 }
             }
 

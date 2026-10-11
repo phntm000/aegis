@@ -380,6 +380,15 @@ E2EE channel (X25519 ephemeral-ephemeral ECDH + 4-word SAS ceremony) and
 thereafter relays all traffic through the primary, which performs all
 cryptographic operations (WhatsApp-Web-style). Message history syncs
 device-to-device over the AES-GCM paired channel.
+**Media sync.** Attachments and voice notes now sync to linked devices too:
+the primary offers each blob over the paired channel (manifest + file key
+sealed in the paired envelope) and streams the AttachmentCrypto ciphertext
+in 32 KiB indexed chunks on request; the linked device reassembles,
+SHA-256-verifies, and decrypts locally, with progress / retry / resume
+across reconnects in the thread UI and outbound progress in Settings →
+Linked devices. Voice-note transcripts ride along in the manifest when the
+primary has one. Linked → primary media sending stays unavailable in v1
+(text only); the composer hides those affordances on linked devices.
 **Why it matters.** People work across phone, tablet, and desktop-class
 devices. Single-device messengers lose to incumbents on this alone.
 **Privacy & security.** No cloud holds your keys — linking is a local QR

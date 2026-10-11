@@ -64,11 +64,21 @@ jobs:
           sleep 12
           xcrun simctl io booted screenshot shot-01-launch.png
           echo "Captured shot-01-launch.png"
+          # Exercise the in-app retry path: relaunch and screenshot again.
+          # (Keychain/database failures can be transient right after boot.)
+          xcrun simctl terminate booted "$BUNDLE_ID" || true
+          sleep 3
+          xcrun simctl launch booted "$BUNDLE_ID"
           sleep 12
-          xcrun simctl io booted screenshot shot-02-settled.png
-          echo "Captured shot-02-settled.png"
+          xcrun simctl io booted screenshot shot-02-retry.png
+          echo "Captured shot-02-retry.png"
           ls -la shot-*.png
           file shot-*.png
+
+      - name: Dump app log tail (diagnostic)
+        if: always()
+        run: |
+          xcrun simctl spawn booted log show --style compact --predicate 'process == "Aegis"' --last 5m 2>/dev/null | tail -40 || echo "log unavailable"
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
